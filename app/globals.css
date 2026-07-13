@@ -1,0 +1,139 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-earth-950: #17130f;
+  --color-earth-900: #211b15;
+  --color-wood-800: #3b2d21;
+  --color-forest-950: #10170f;
+  --color-forest-900: #171f15;
+  --color-moss-600: #64734b;
+  --color-moss-400: #93a66f;
+  --color-stone-500: #77786f;
+  --color-stone-300: #b4b5aa;
+  --color-stone-100: #e7e7df;
+
+  --font-sans: Arial, Helvetica, sans-serif;
+}
+
+:root {
+  --background: var(--color-forest-950);
+  --surface: var(--color-forest-900);
+  --surface-raised: var(--color-earth-900);
+  --border: color-mix(in srgb, var(--color-stone-500) 35%, transparent);
+  --text-primary: var(--color-stone-100);
+  --text-secondary: var(--color-stone-300);
+  --accent: var(--color-moss-400);
+  --focus-ring: var(--color-moss-400);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  width: 100%;
+  height: 100%;
+  background: var(--background);
+  overflow: hidden;
+}
+
+body {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  margin: 0;
+  background: var(--background);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+:focus-visible {
+  outline: 0.125rem solid var(--focus-ring);
+  outline-offset: 0.1875rem;
+}
+
+.site-shell {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+}
+
+.main-navigation {
+  display: flex;
+  min-height: 3.75rem;
+  align-items: center;
+  border-bottom: 0.0625rem solid var(--border);
+  background: var(--surface);
+  padding-inline: clamp(1rem, 4vw, 3rem);
+}
+
+.main-navigation__brand {
+  color: var(--accent);
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.site-main,
+.home-page {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.home-page {
+  display: grid;
+  padding: clamp(0.75rem, 2vw, 1.5rem);
+}
+
+.game-viewport {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border: 0.0625rem solid
+    color-mix(in srgb, var(--color-stone-500) 42%, transparent);
+  border-radius: clamp(0.5rem, 1vw, 0.75rem);
+  background: var(--surface-raised);
+  box-shadow:
+    0 1.25rem 3rem rgb(0 0 0 / 0.28),
+    inset 0 0 0 0.0625rem rgb(231 231 223 / 0.04),
+    inset 0 0 5rem rgb(0 0 0 / 0.32);
+}
+
+.game-viewport::after {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: '';
+  background:
+    linear-gradient(rgb(231 231 223 / 0.035), transparent 18%),
+    radial-gradient(circle at center, transparent 42%, rgb(0 0 0 / 0.28) 100%);
+}
+
+.game-viewport canvas {
+  display: block;
+  max-width: 100%;
+}
+
+@media (min-width: 48rem) {
+  .main-navigation {
+    min-height: 4.25rem;
+  }
+}
