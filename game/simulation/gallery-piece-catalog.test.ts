@@ -13,6 +13,7 @@ describe('galleryPieceCatalog', () => {
     expect(new Set(galleryPieceCatalog.map((piece) => piece.kind))).toEqual(
       new Set([
         GalleryPieceKind.Cross,
+        GalleryPieceKind.QueenChamber,
         GalleryPieceKind.Room,
         GalleryPieceKind.Straight,
         GalleryPieceKind.Tee,
@@ -67,6 +68,16 @@ describe('galleryPieceCatalog', () => {
     expect(findGalleryPieceDefinition('missing')).toBeUndefined();
   });
 
+  it('defines the queen chamber as a multi-cell room anchor', () => {
+    expect(findGalleryPieceDefinition('queen-chamber')).toMatchObject({
+      id: 'queen-chamber',
+      kind: GalleryPieceKind.QueenChamber,
+      width: 2,
+      height: 2,
+      entranceLimit: 4,
+    });
+  });
+
   it('creates a placed gallery piece from a definition', () => {
     expect(
       createGalleryPieceFromDefinition({
@@ -76,6 +87,7 @@ describe('galleryPieceCatalog', () => {
       }),
     ).toEqual({
       id: 'piece-1',
+      entranceLimit: 2,
       position: { column: 3, row: 4 },
       size: { columns: 1, rows: 1 },
       connections: [GridDirection.Right, GridDirection.Down],
@@ -90,6 +102,7 @@ describe('galleryPieceCatalog', () => {
         position: { column: 2, row: 2 },
       }),
     ).toMatchObject({
+      entranceLimit: 4,
       size: { columns: 2, rows: 2 },
     });
   });

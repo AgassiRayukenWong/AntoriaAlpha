@@ -1,8 +1,12 @@
 import {
+  areGalleryPiecesAdjacent,
   areGalleryPiecesConnected,
+  countGalleryPieceEntrances,
   createConstructionGrid,
   getDirectionBetweenAdjacentPositions,
+  getGalleryNetworkPieceIds,
   getGalleryPieceOccupiedPositions,
+  getOppositeDirection,
   GridDirection,
   isGridPositionOccupied,
   placeGalleryPiece,
@@ -31,9 +35,54 @@ interface GalleryRect {
   readonly y: number;
 }
 
+interface EntranceMarker {
+  readonly x: number;
+  readonly y: number;
+}
+
+interface ToolButtonArea {
+  readonly height: number;
+  readonly mode: ConstructionToolMode;
+  readonly width: number;
+  readonly x: number;
+  readonly y: number;
+}
+
+interface ConstructionPieceButtonArea {
+  readonly height: number;
+  readonly pieceType: ConstructionPieceType;
+  readonly width: number;
+  readonly x: number;
+  readonly y: number;
+}
+
+interface FloatingMenuToggleArea {
+  readonly height: number;
+  readonly width: number;
+  readonly x: number;
+  readonly y: number;
+}
+
+interface FloatingMenuRect {
+  readonly height: number;
+  readonly width: number;
+  readonly x: number;
+  readonly y: number;
+}
+
 export interface ConstructionGridPointer {
   readonly x: number;
   readonly y: number;
+}
+
+export enum ConstructionToolMode {
+  Build = 'build',
+  Destroy = 'destroy',
+}
+
+export enum ConstructionPieceType {
+  Gallery = 'gallery',
+  Room = 'room',
 }
 
 const constructionGridPalette = {
@@ -42,24 +91,71 @@ const constructionGridPalette = {
   conduitFill: 0x242017,
   conduitInner: 0x0b0a08,
   depthBands: [0x17130f, 0x1d1711, 0x241b13, 0x1b1510, 0x120f0c],
+  entranceMarker: 0xf0c76a,
+  entranceMarkerBorder: 0x3a2714,
+  entranceMarkerFull: 0xd46a56,
+  entranceTextFull: '#d46a56',
+  panelFill: 0x17130f,
+  ghostBlockedFill: 0x8f2d24,
+  ghostBlockedStroke: 0xd46a56,
+  ghostFill: 0x7a542f,
+  ghostStroke: 0xf0c76a,
   gridBorder: 0x5f5440,
   gridBlockedHover: 0xb85b4b,
   gridLine: 0x6d6048,
   gridHover: 0xd0b071,
   gridBlockedSelection: 0xd46a56,
   gridSelection: 0xf0c76a,
+  pieceSelection: 0xf0c76a,
+  queenAccent: 0xf0c76a,
+  queenBody: 0x8a4f28,
+  toolButtonActiveFill: 0x4b351e,
+  toolButtonInactiveFill: 0x211b15,
   galleryBorder: 0xb2874c,
   galleryFill: 0x6b4424,
   galleryHighlight: 0xd0b071,
   galleryShadow: 0x0a0705,
   moss: 0x64734b,
+  networkConnected: 0x9fbf73,
+  networkDisconnected: 0xd46a56,
   roomFill: 0x50341f,
   roomHighlight: 0xe0c08a,
   roomInnerShadow: 0x24160d,
   soilLine: 0x78644a,
   softLight: 0x93a66f,
   surface: 0x0d160f,
+  textShadow: '#24160d',
+  textWarning: '#f0c76a',
 } as const;
+
+const constructionToolModeLabels = {
+  [ConstructionToolMode.Build]: 'Construire',
+  [ConstructionToolMode.Destroy]: 'D\u00e9truire',
+} as const satisfies Record<ConstructionToolMode, string>;
+
+const constructionTextResolution = 2;
+
+const constructionPieceTypeLabels = {
+  [ConstructionPieceType.Gallery]: {
+    costLabel: 'Co\u00fbt 1',
+    keyLabel: '1',
+    nameLabel: 'Galerie',
+  },
+  [ConstructionPieceType.Room]: {
+    costLabel: 'Co\u00fbt 4',
+    keyLabel: '2',
+    nameLabel: 'Chambre',
+  },
+} as const satisfies Record<
+  ConstructionPieceType,
+  {
+    readonly costLabel: string;
+    readonly keyLabel: string;
+    readonly nameLabel: string;
+  }
+>;
+
+const queenChamberPieceId = 'sample-queen-chamber';
 
 const constructionGridLayout = {
   columns: 16,
@@ -72,7 +168,7 @@ const constructionGridLayout = {
   horizontalPaddingRatio: 0.055,
   minimumTopPadding: 18,
   reservedTopRows: 1,
-  rows: 9,
+  rows: 18,
   sampleGalleryPieces: [
     createGalleryPieceFromDefinition({
       definitionId: 'straight-vertical',
@@ -110,8 +206,8 @@ const constructionGridLayout = {
       position: { column: 11, row: 3 },
     }),
     createGalleryPieceFromDefinition({
-      definitionId: 'small-room',
-      pieceId: 'sample-gallery-8',
+      definitionId: 'queen-chamber',
+      pieceId: queenChamberPieceId,
       position: { column: 9, row: 2 },
     }),
     createGalleryPieceFromDefinition({
@@ -128,6 +224,7 @@ const constructionGridLayout = {
   soilLineCount: 18,
   surfaceRatio: 0.16,
   verticalPaddingRatio: 0.045,
+  visibleRows: 9,
 } as const satisfies {
   readonly columns: number;
   readonly conduit: ConstructionGridConduit;
@@ -141,14 +238,27 @@ const constructionGridLayout = {
   readonly soilLineCount: number;
   readonly surfaceRatio: number;
   readonly verticalPaddingRatio: number;
+  readonly visibleRows: number;
 };
 
 export class ConstructionGridRenderer {
+  private actionHintLabel?: PhaserType.GameObjects.Text;
   private constructionGrid: ConstructionGrid;
+  private entranceCounterLabels: PhaserType.GameObjects.Text[] = [];
+  private floatingMenuRect?: FloatingMenuRect;
+  private floatingMenuToggleArea?: FloatingMenuToggleArea;
+  private networkStatusLabel?: PhaserType.GameObjects.Text;
+  private constructionPieceButtonAreas: readonly ConstructionPieceButtonArea[] =
+    [];
+  private queenStatusLabel?: PhaserType.GameObjects.Text;
+  private selectedInfoLabel?: PhaserType.GameObjects.Text;
+  private toolButtonAreas: readonly ToolButtonArea[] = [];
+  private toolModeLabel?: PhaserType.GameObjects.Text;
   private placedGalleryIndex = 1;
 
   public constructor(
     private readonly graphics: PhaserType.GameObjects.Graphics,
+    private readonly gameObjects: PhaserType.GameObjects.GameObjectFactory,
     private readonly Phaser: typeof PhaserType,
   ) {
     this.constructionGrid = createConstructionGrid(
@@ -165,27 +275,77 @@ export class ConstructionGridRenderer {
     height: number,
     pointer?: ConstructionGridPointer,
     selectedPosition?: ConstructionGridPosition,
+    toolMode: ConstructionToolMode = ConstructionToolMode.Build,
+    selectedPieceType: ConstructionPieceType = ConstructionPieceType.Gallery,
+    gridScrollY = 0,
+    isFloatingMenuCollapsed = false,
+    floatingMenuSlideProgress = isFloatingMenuCollapsed ? 1 : 0,
   ): void {
-    const gridArea = this.createGridArea(width, height);
+    const gridArea = this.createGridArea(width, height, gridScrollY);
+    const viewportGridArea = this.createGridArea(width, height);
+    const floatingMenuOffsetX = this.getFloatingMenuOffsetX(
+      viewportGridArea,
+      floatingMenuSlideProgress,
+    );
 
+    this.toolButtonAreas = this.createToolButtonAreas(
+      viewportGridArea,
+      floatingMenuOffsetX,
+    );
+    this.constructionPieceButtonAreas = this.createConstructionPieceButtonAreas(
+      viewportGridArea,
+      floatingMenuOffsetX,
+    );
+    const floatingMenuRect = this.createFloatingMenuRect(
+      viewportGridArea,
+      floatingMenuOffsetX,
+    );
+    this.floatingMenuRect = floatingMenuRect;
+    this.floatingMenuToggleArea = this.createFloatingMenuToggleArea(
+      viewportGridArea,
+      floatingMenuRect,
+    );
+    this.clearActionHintLabel();
+    this.clearEntranceCounterLabels();
+    this.clearNetworkStatusLabel();
+    this.clearQueenStatusLabel();
+    this.clearSelectedInfoLabel();
+    this.clearToolModeLabel();
     this.graphics.clear();
     this.drawBackground(width, height);
     this.drawSurface(width, height, gridArea);
     this.drawSoilTexture(width, height);
     this.drawSoftLight(width, height, gridArea);
     this.drawGrid(gridArea);
-    this.drawSelectedGridCell(gridArea, selectedPosition);
-    this.drawHoveredGridCell(gridArea, pointer);
+    this.drawSelectedGridCell(gridArea, selectedPosition, selectedPieceType);
     this.drawGalleryPieces(gridArea, this.constructionGrid.pieces);
+    this.drawQueenAnchor(gridArea);
+    this.drawSelectedPiece(gridArea, selectedPosition);
+    if (floatingMenuSlideProgress < 1) {
+      this.drawFloatingMenuPanel(viewportGridArea, floatingMenuRect);
+      this.drawToolModeLabel(viewportGridArea, toolMode, floatingMenuOffsetX);
+      this.drawToolButtons(viewportGridArea, toolMode);
+      this.drawConstructionPiecePanel(viewportGridArea, selectedPieceType);
+      this.drawNetworkStatusLabel(viewportGridArea, floatingMenuOffsetX);
+    }
+    this.drawSelectedInfoLabel(gridArea, selectedPosition);
+    this.drawToolPreview(gridArea, pointer, toolMode, selectedPieceType);
+    this.drawActionHintLabel(gridArea, pointer, toolMode, selectedPieceType);
     this.drawConduit(gridArea, constructionGridLayout.conduit);
+    this.drawFloatingMenuToggle(
+      viewportGridArea,
+      pointer,
+      isFloatingMenuCollapsed,
+    );
   }
 
   public getGridPositionAtPointer(
     width: number,
     height: number,
     pointer: ConstructionGridPointer,
+    gridScrollY = 0,
   ): ConstructionGridPosition | undefined {
-    const gridArea = this.createGridArea(width, height);
+    const gridArea = this.createGridArea(width, height, gridScrollY);
     const position = this.getGridPositionAtPoint(gridArea, pointer);
 
     if (position === undefined) {
@@ -195,23 +355,256 @@ export class ConstructionGridRenderer {
     return position;
   }
 
-  public placeGalleryAtPosition(position: ConstructionGridPosition): boolean {
-    if (isGridPositionOccupied(this.constructionGrid, position)) {
+  public getMaximumGridScrollY(width: number, height: number): number {
+    const gridArea = this.createGridArea(width, height);
+    const viewportHeight =
+      height - gridArea.y - height * constructionGridLayout.verticalPaddingRatio;
+
+    return Math.max(0, gridArea.height - viewportHeight);
+  }
+
+  public getToolModeAtPointer(
+    width: number,
+    height: number,
+    pointer: ConstructionGridPointer,
+    isFloatingMenuCollapsed = false,
+  ): ConstructionToolMode | undefined {
+    if (isFloatingMenuCollapsed) {
+      return undefined;
+    }
+
+    if (this.toolButtonAreas.length === 0) {
+      this.toolButtonAreas = this.createToolButtonAreas(
+        this.createGridArea(width, height),
+      );
+    }
+
+    return this.toolButtonAreas.find(
+      (area) =>
+        pointer.x >= area.x &&
+        pointer.x <= area.x + area.width &&
+        pointer.y >= area.y &&
+        pointer.y <= area.y + area.height,
+    )?.mode;
+  }
+
+  public getConstructionPieceTypeAtPointer(
+    width: number,
+    height: number,
+    pointer: ConstructionGridPointer,
+    isFloatingMenuCollapsed = false,
+  ): ConstructionPieceType | undefined {
+    if (isFloatingMenuCollapsed) {
+      return undefined;
+    }
+
+    if (this.constructionPieceButtonAreas.length === 0) {
+      this.constructionPieceButtonAreas =
+        this.createConstructionPieceButtonAreas(
+          this.createGridArea(width, height),
+        );
+    }
+
+    return this.constructionPieceButtonAreas.find(
+      (area) =>
+        pointer.x >= area.x &&
+        pointer.x <= area.x + area.width &&
+        pointer.y >= area.y &&
+        pointer.y <= area.y + area.height,
+    )?.pieceType;
+  }
+
+  public isFloatingMenuToggleAtPointer(
+    width: number,
+    height: number,
+    pointer: ConstructionGridPointer,
+  ): boolean {
+    if (this.floatingMenuToggleArea === undefined) {
+      this.floatingMenuToggleArea = this.createFloatingMenuToggleArea(
+        this.createGridArea(width, height),
+      );
+    }
+
+    return this.isPointInsideFloatingMenuToggle(pointer);
+  }
+
+  public isFloatingMenuPanelAtPointer(
+    width: number,
+    height: number,
+    pointer: ConstructionGridPointer,
+    floatingMenuSlideProgress: number,
+  ): boolean {
+    if (floatingMenuSlideProgress >= 1) {
       return false;
     }
 
-    const definitionId = this.getGalleryDefinitionIdForPosition(position);
-    const piece = createGalleryPieceFromDefinition({
-      definitionId,
-      pieceId: `placed-gallery-${this.placedGalleryIndex}`,
-      position,
-    });
+    if (this.floatingMenuRect === undefined) {
+      const gridArea = this.createGridArea(width, height);
+      const floatingMenuOffsetX = this.getFloatingMenuOffsetX(
+        gridArea,
+        floatingMenuSlideProgress,
+      );
+
+      this.floatingMenuRect = this.createFloatingMenuRect(
+        gridArea,
+        floatingMenuOffsetX,
+      );
+    }
+
+    return (
+      pointer.x >= this.floatingMenuRect.x &&
+      pointer.x <= this.floatingMenuRect.x + this.floatingMenuRect.width &&
+      pointer.y >= this.floatingMenuRect.y &&
+      pointer.y <= this.floatingMenuRect.y + this.floatingMenuRect.height
+    );
+  }
+
+  public placeConstructionPieceAtPosition(
+    position: ConstructionGridPosition,
+    pieceType: ConstructionPieceType,
+  ): boolean {
+    if (!this.canPlaceConstructionPieceAtPosition(position, pieceType)) {
+      return false;
+    }
+
+    const piece = this.createConstructionPieceForPosition(position, pieceType);
 
     this.constructionGrid = placeGalleryPiece(this.constructionGrid, piece);
-    this.refreshGalleryPiecesAroundPosition(position);
+    getGalleryPieceOccupiedPositions(piece).forEach((occupiedPosition) => {
+      this.refreshGalleryPiecesAroundPosition(occupiedPosition);
+    });
     this.placedGalleryIndex += 1;
 
     return true;
+  }
+
+  private canPlaceConstructionPieceAtPosition(
+    position: ConstructionGridPosition,
+    pieceType: ConstructionPieceType,
+  ): boolean {
+    const piece = this.createConstructionPieceForPosition(position, pieceType);
+
+    try {
+      placeGalleryPiece(this.constructionGrid, piece);
+    } catch (error) {
+      if (error instanceof RangeError) {
+        return false;
+      }
+
+      throw error;
+    }
+
+    if (this.wouldExceedRoomEntranceLimit(piece)) {
+      return false;
+    }
+
+    return this.isGalleryPieceTouchingQueenNetwork(piece);
+  }
+
+  private createConstructionPieceForPosition(
+    position: ConstructionGridPosition,
+    pieceType: ConstructionPieceType,
+  ): GalleryPiece {
+    if (pieceType === ConstructionPieceType.Room) {
+      return createGalleryPieceFromDefinition({
+        definitionId: 'small-room',
+        pieceId: `placed-gallery-${this.placedGalleryIndex}`,
+        position,
+      });
+    }
+
+    return this.createGalleryPieceForPosition(position);
+  }
+
+  private createGalleryPieceForPosition(
+    position: ConstructionGridPosition,
+  ): GalleryPiece {
+    return createGalleryPieceFromDefinition({
+      definitionId: this.getGalleryDefinitionIdForPosition(position),
+      pieceId: `placed-gallery-${this.placedGalleryIndex}`,
+      position,
+    });
+  }
+
+  public removeGalleryAtPosition(position: ConstructionGridPosition): boolean {
+    const piece = this.findPieceAtPosition(position);
+
+    if (piece === undefined) {
+      return false;
+    }
+
+    const occupiedPositions = getGalleryPieceOccupiedPositions(piece);
+
+    this.constructionGrid = removeGalleryPiece(this.constructionGrid, piece.id);
+    occupiedPositions.forEach((occupiedPosition) => {
+      this.refreshGalleryPiecesAroundPosition(occupiedPosition);
+    });
+
+    return true;
+  }
+
+  private wouldExceedRoomEntranceLimit(piece: GalleryPiece): boolean {
+    let nextGrid: ConstructionGrid;
+
+    try {
+      nextGrid = placeGalleryPiece(this.constructionGrid, piece);
+    } catch (error) {
+      if (error instanceof RangeError) {
+        return false;
+      }
+
+      throw error;
+    }
+
+    return nextGrid.pieces
+      .filter(
+        (gridPiece) =>
+          this.isRoomPiece(gridPiece) && gridPiece.entranceLimit !== undefined,
+      )
+      .some((roomPiece) => {
+        const entranceLimit = roomPiece.entranceLimit;
+
+        return (
+          entranceLimit !== undefined &&
+          countGalleryPieceEntrances(nextGrid, roomPiece) > entranceLimit
+        );
+      });
+  }
+
+  private isGalleryPieceTouchingQueenNetwork(piece: GalleryPiece): boolean {
+    const queenNetworkPieceIds = this.getQueenNetworkPieceIds();
+
+    if (queenNetworkPieceIds.size === 0) {
+      return false;
+    }
+
+    return this.constructionGrid.pieces.some(
+      (existingPiece) =>
+        queenNetworkPieceIds.has(existingPiece.id) &&
+        this.areGalleryPiecesPlacementLinked(piece, existingPiece),
+    );
+  }
+
+  private areGalleryPiecesPlacementLinked(
+    firstPiece: GalleryPiece,
+    secondPiece: GalleryPiece,
+  ): boolean {
+    if (this.isRoomPiece(firstPiece) || this.isRoomPiece(secondPiece)) {
+      return areGalleryPiecesAdjacent(firstPiece, secondPiece);
+    }
+
+    if (
+      this.isSingleCellPiece(firstPiece) &&
+      this.isSingleCellPiece(secondPiece)
+    ) {
+      return areGalleryPiecesAdjacent(firstPiece, secondPiece);
+    }
+
+    return areGalleryPiecesConnected(firstPiece, secondPiece);
+  }
+
+  private isSingleCellPiece(piece: GalleryPiece): boolean {
+    return piece.size.columns === 1 && piece.size.rows === 1;
   }
 
   private refreshGalleryPiecesAroundPosition(
@@ -242,13 +635,43 @@ export class ConstructionGridRenderer {
   private findSingleCellPieceAtPosition(
     position: ConstructionGridPosition,
   ): GalleryPiece | undefined {
-    return this.constructionGrid.pieces.find(
-      (piece) =>
-        piece.size.columns === 1 &&
-        piece.size.rows === 1 &&
-        piece.position.column === position.column &&
-        piece.position.row === position.row,
+    const piece = this.findPieceAtPosition(position);
+
+    if (
+      piece === undefined ||
+      piece.size.columns !== 1 ||
+      piece.size.rows !== 1
+    ) {
+      return undefined;
+    }
+
+    return piece;
+  }
+
+  private findPieceAtPosition(
+    position: ConstructionGridPosition,
+  ): GalleryPiece | undefined {
+    return this.constructionGrid.pieces.find((piece) =>
+      getGalleryPieceOccupiedPositions(piece).some(
+        (occupiedPosition) =>
+          occupiedPosition.column === position.column &&
+          occupiedPosition.row === position.row,
+      ),
     );
+  }
+
+  private findQueenChamber(): GalleryPiece | undefined {
+    return this.constructionGrid.pieces.find(
+      (piece) => piece.id === queenChamberPieceId,
+    );
+  }
+
+  private getQueenNetworkPieceIds(): ReadonlySet<string> {
+    if (this.findQueenChamber() === undefined) {
+      return new Set<string>();
+    }
+
+    return getGalleryNetworkPieceIds(this.constructionGrid, queenChamberPieceId);
   }
 
   private replaceGalleryPiece(piece: GalleryPiece, definitionId: string): void {
@@ -328,6 +751,11 @@ export class ConstructionGridRenderer {
     position: ConstructionGridPosition,
   ): readonly GridDirection[] {
     const neighborDirections: GridDirection[] = [];
+    const conduitDirection = this.getConduitConnectionDirection(position);
+
+    if (conduitDirection !== undefined) {
+      neighborDirections.push(conduitDirection);
+    }
 
     const candidates = [
       {
@@ -363,7 +791,34 @@ export class ConstructionGridRenderer {
     return neighborDirections;
   }
 
-  private createGridArea(width: number, height: number): GridArea {
+  private getConduitConnectionDirection(
+    position: ConstructionGridPosition,
+  ): GridDirection | undefined {
+    try {
+      const directionFromConduit = getDirectionBetweenAdjacentPositions(
+        constructionGridLayout.conduit.position,
+        position,
+      );
+
+      if (directionFromConduit !== constructionGridLayout.conduit.direction) {
+        return undefined;
+      }
+
+      return getOppositeDirection(directionFromConduit);
+    } catch (error) {
+      if (error instanceof RangeError) {
+        return undefined;
+      }
+
+      throw error;
+    }
+  }
+
+  private createGridArea(
+    width: number,
+    height: number,
+    scrollOffsetY = 0,
+  ): GridArea {
     const availableWidth =
       width * (1 - constructionGridLayout.horizontalPaddingRatio * 2);
     const availableHeight =
@@ -374,7 +829,8 @@ export class ConstructionGridRenderer {
     const cellSize = Math.min(
       availableWidth / constructionGridLayout.columns,
       availableHeight /
-        (constructionGridLayout.rows + constructionGridLayout.reservedTopRows),
+        (constructionGridLayout.visibleRows +
+          constructionGridLayout.reservedTopRows),
     );
     const gridWidth = cellSize * constructionGridLayout.columns;
     const gridHeight = cellSize * constructionGridLayout.rows;
@@ -392,7 +848,8 @@ export class ConstructionGridRenderer {
       y:
         height * constructionGridLayout.surfaceRatio +
         topPadding +
-        reservedTopHeight,
+        reservedTopHeight -
+        scrollOffsetY,
     };
   }
 
@@ -497,9 +954,579 @@ export class ConstructionGridRenderer {
     );
   }
 
+  private drawToolModeLabel(
+    gridArea: GridArea,
+    toolMode: ConstructionToolMode,
+    floatingMenuOffsetX: number,
+  ): void {
+    const layout = this.getFloatingMenuLayout(gridArea, floatingMenuOffsetX);
+    const label = this.gameObjects.text(
+      layout.contentX,
+      layout.modeY,
+      `Mode : ${constructionToolModeLabels[toolMode]}`,
+      {
+        color: constructionGridPalette.textWarning,
+        fontFamily: 'Arial, Helvetica, sans-serif',
+        fontSize: `${Math.max(11, Math.round(gridArea.cellSize * 0.18))}px`,
+        fontStyle: '700',
+        resolution: constructionTextResolution,
+      },
+    );
+
+    label.setOrigin(0, 0.5);
+    label.setShadow(
+      1,
+      1,
+      constructionGridPalette.textShadow,
+      2,
+      true,
+      true,
+    );
+    label.setDepth(1);
+    this.toolModeLabel = label;
+  }
+
+  private createFloatingMenuRect(
+    gridArea: GridArea,
+    floatingMenuOffsetX: number,
+  ): FloatingMenuRect {
+    const layout = this.getFloatingMenuLayout(gridArea, floatingMenuOffsetX);
+
+    return {
+      height: layout.height,
+      width: layout.width,
+      x: layout.x,
+      y: layout.y,
+    };
+  }
+
+  private getFloatingMenuLayout(
+    gridArea: GridArea,
+    floatingMenuOffsetX = 0,
+  ): {
+    readonly contentX: number;
+    readonly height: number;
+    readonly modeY: number;
+    readonly networkY: number;
+    readonly padding: number;
+    readonly pieceButtonHeight: number;
+    readonly pieceButtonWidth: number;
+    readonly pieceFirstY: number;
+    readonly rowGap: number;
+    readonly titleY: number;
+    readonly toolButtonHeight: number;
+    readonly toolButtonWidth: number;
+    readonly toolY: number;
+    readonly width: number;
+    readonly x: number;
+    readonly y: number;
+  } {
+    const padding = Math.max(18, gridArea.cellSize * 0.28);
+    const rowGap = Math.max(10, gridArea.cellSize * 0.15);
+    const toolButtonWidth = Math.max(84, gridArea.cellSize * 1.85);
+    const toolButtonHeight = Math.max(24, gridArea.cellSize * 0.36);
+    const toolButtonsWidth = toolButtonWidth * 2 + rowGap;
+    const pieceButtonWidth = Math.max(
+      220,
+      gridArea.cellSize * 4.1,
+      toolButtonsWidth,
+    );
+    const pieceButtonHeight = Math.max(30, gridArea.cellSize * 0.46);
+    const x = Math.max(16, gridArea.cellSize * 0.32) + floatingMenuOffsetX;
+    const y = Math.max(8, gridArea.cellSize * 0.12);
+    const contentX = x + padding;
+    const networkY = y + padding;
+    const modeY = networkY + Math.max(28, gridArea.cellSize * 0.42);
+    const toolY = modeY + Math.max(28, gridArea.cellSize * 0.42);
+    const titleY = toolY + toolButtonHeight + rowGap * 2.1;
+    const pieceFirstY = titleY + rowGap * 0.65;
+    const height =
+      pieceFirstY + pieceButtonHeight * 2 + rowGap - y + padding;
+    const width = pieceButtonWidth + padding * 2;
+
+    return {
+      contentX,
+      height,
+      modeY,
+      networkY,
+      padding,
+      pieceButtonHeight,
+      pieceButtonWidth,
+      pieceFirstY,
+      rowGap,
+      titleY,
+      toolButtonHeight,
+      toolButtonWidth,
+      toolY,
+      width,
+      x,
+      y,
+    };
+  }
+
+  private drawFloatingMenuPanel(
+    gridArea: GridArea,
+    rect: FloatingMenuRect,
+  ): void {
+    const cornerRadius = Math.max(10, gridArea.cellSize * 0.16);
+
+    this.graphics.fillStyle(constructionGridPalette.panelFill, 0.82);
+    this.graphics.fillRoundedRect(
+      rect.x,
+      rect.y,
+      rect.width,
+      rect.height,
+      cornerRadius,
+    );
+    this.graphics.lineStyle(1, constructionGridPalette.gridBorder, 0.56);
+    this.graphics.strokeRoundedRect(
+      rect.x,
+      rect.y,
+      rect.width,
+      rect.height,
+      cornerRadius,
+    );
+  }
+
+  private createFloatingMenuToggleArea(
+    gridArea: GridArea,
+    menuRect?: FloatingMenuRect,
+  ): FloatingMenuToggleArea {
+    const layout = this.getFloatingMenuLayout(
+      gridArea,
+      menuRect === undefined ? 0 : menuRect.x - Math.max(16, gridArea.cellSize * 0.32),
+    );
+    const height = Math.max(38, gridArea.cellSize * 0.6);
+    const width = Math.max(22, gridArea.cellSize * 0.34);
+    const x =
+      menuRect === undefined
+        ? 0
+        : Math.max(0, menuRect.x + menuRect.width - width * 0.35);
+    const toggleCenterY =
+      menuRect === undefined
+        ? Math.max(16, gridArea.cellSize * 0.24) + height / 2
+        : (layout.networkY + layout.modeY) / 2;
+    const y =
+      menuRect === undefined
+        ? Math.max(16, gridArea.cellSize * 0.24)
+        : toggleCenterY - height / 2;
+
+    return {
+      height,
+      width,
+      x,
+      y,
+    };
+  }
+
+  private drawFloatingMenuToggle(
+    gridArea: GridArea,
+    pointer: ConstructionGridPointer | undefined,
+    isFloatingMenuCollapsed: boolean,
+  ): void {
+    const area = this.floatingMenuToggleArea;
+
+    if (area === undefined) {
+      return;
+    }
+
+    const isHovered =
+      pointer !== undefined && this.isPointInsideFloatingMenuToggle(pointer);
+    const cornerRadius = Math.max(8, gridArea.cellSize * 0.12);
+
+    this.graphics.fillStyle(
+      isHovered
+        ? constructionGridPalette.toolButtonActiveFill
+        : constructionGridPalette.panelFill,
+      isHovered ? 0.96 : 0.84,
+    );
+    this.graphics.fillRoundedRect(
+      area.x,
+      area.y,
+      area.width,
+      area.height,
+      cornerRadius,
+    );
+    this.graphics.lineStyle(
+      2,
+      isHovered
+        ? constructionGridPalette.ghostStroke
+        : constructionGridPalette.gridBorder,
+      isHovered ? 0.88 : 0.48,
+    );
+    this.graphics.strokeRoundedRect(
+      area.x,
+      area.y,
+      area.width,
+      area.height,
+      cornerRadius,
+    );
+
+    const symbol = this.gameObjects.text(
+      area.x + area.width / 2,
+      area.y + area.height / 2,
+      isFloatingMenuCollapsed ? '>' : '<',
+      {
+        color: constructionGridPalette.textWarning,
+        fontFamily: 'Arial, Helvetica, sans-serif',
+        fontSize: `${Math.max(18, Math.round(gridArea.cellSize * 0.28))}px`,
+        fontStyle: '700',
+        resolution: constructionTextResolution,
+      },
+    );
+
+    symbol.setOrigin(0.5);
+    symbol.setDepth(2);
+    this.entranceCounterLabels.push(symbol);
+
+    if (isHovered) {
+      this.drawFloatingMenuToggleTooltip(gridArea, area);
+    }
+  }
+
+  private drawFloatingMenuToggleTooltip(
+    gridArea: GridArea,
+    area: FloatingMenuToggleArea,
+  ): void {
+    const tooltipWidth = Math.max(52, gridArea.cellSize * 0.84);
+    const tooltipHeight = Math.max(24, gridArea.cellSize * 0.34);
+    const tooltipX = area.x + area.width + Math.max(8, gridArea.cellSize * 0.12);
+    const tooltipY = area.y + area.height / 2 - tooltipHeight / 2;
+    const cornerRadius = Math.max(6, gridArea.cellSize * 0.09);
+
+    this.graphics.fillStyle(constructionGridPalette.panelFill, 0.94);
+    this.graphics.fillRoundedRect(
+      tooltipX,
+      tooltipY,
+      tooltipWidth,
+      tooltipHeight,
+      cornerRadius,
+    );
+    this.graphics.lineStyle(1, constructionGridPalette.ghostStroke, 0.62);
+    this.graphics.strokeRoundedRect(
+      tooltipX,
+      tooltipY,
+      tooltipWidth,
+      tooltipHeight,
+      cornerRadius,
+    );
+
+    const label = this.gameObjects.text(
+      tooltipX + tooltipWidth / 2,
+      tooltipY + tooltipHeight / 2,
+      'Tab',
+      {
+        color: constructionGridPalette.textWarning,
+        fontFamily: 'Arial, Helvetica, sans-serif',
+        fontSize: `${Math.max(11, Math.round(gridArea.cellSize * 0.15))}px`,
+        fontStyle: '700',
+        resolution: constructionTextResolution,
+      },
+    );
+
+    label.setOrigin(0.5);
+    label.setDepth(2);
+    this.entranceCounterLabels.push(label);
+  }
+
+  private isPointInsideFloatingMenuToggle(
+    pointer: ConstructionGridPointer,
+  ): boolean {
+    const area = this.floatingMenuToggleArea;
+
+    return (
+      area !== undefined &&
+      pointer.x >= area.x &&
+      pointer.x <= area.x + area.width &&
+      pointer.y >= area.y &&
+      pointer.y <= area.y + area.height
+    );
+  }
+
+  private getFloatingMenuOffsetX(
+    gridArea: GridArea,
+    slideProgress: number,
+  ): number {
+    const easedProgress = 1 - (1 - slideProgress) ** 3;
+    const menuWidth = this.getFloatingMenuLayout(gridArea).width;
+
+    return -menuWidth * easedProgress;
+  }
+
+  private createToolButtonAreas(
+    gridArea: GridArea,
+    floatingMenuOffsetX = 0,
+  ): readonly ToolButtonArea[] {
+    const layout = this.getFloatingMenuLayout(gridArea, floatingMenuOffsetX);
+    const buttonWidth = layout.toolButtonWidth;
+    const buttonHeight = layout.toolButtonHeight;
+    const gap = layout.rowGap;
+    const x = layout.contentX;
+    const y = layout.toolY;
+
+    return [
+      {
+        height: buttonHeight,
+        mode: ConstructionToolMode.Build,
+        width: buttonWidth,
+        x,
+        y,
+      },
+      {
+        height: buttonHeight,
+        mode: ConstructionToolMode.Destroy,
+        width: buttonWidth,
+        x: x + buttonWidth + gap,
+        y,
+      },
+    ];
+  }
+
+  private drawToolButtons(
+    gridArea: GridArea,
+    toolMode: ConstructionToolMode,
+  ): void {
+    const cornerRadius = Math.max(6, gridArea.cellSize * 0.1);
+
+    this.toolButtonAreas.forEach((area) => {
+      const isActive = area.mode === toolMode;
+      const fillColor = isActive
+        ? constructionGridPalette.toolButtonActiveFill
+        : constructionGridPalette.toolButtonInactiveFill;
+      const borderColor = isActive
+        ? constructionGridPalette.ghostStroke
+        : constructionGridPalette.gridBorder;
+
+      this.graphics.fillStyle(fillColor, isActive ? 0.95 : 0.86);
+      this.graphics.fillRoundedRect(
+        area.x,
+        area.y,
+        area.width,
+        area.height,
+        cornerRadius,
+      );
+      this.graphics.lineStyle(2, borderColor, isActive ? 0.9 : 0.55);
+      this.graphics.strokeRoundedRect(
+        area.x,
+        area.y,
+        area.width,
+        area.height,
+        cornerRadius,
+      );
+
+      const label = this.gameObjects.text(
+        area.x + area.width / 2,
+        area.y + area.height / 2,
+        `${area.mode === ConstructionToolMode.Build ? 'B' : 'D'} ${
+          constructionToolModeLabels[area.mode]
+        }`,
+        {
+          color: isActive
+            ? constructionGridPalette.textWarning
+            : '#b4b5aa',
+          fontFamily: 'Arial, Helvetica, sans-serif',
+          fontSize: `${Math.max(11, Math.round(gridArea.cellSize * 0.16))}px`,
+          fontStyle: '700',
+        resolution: constructionTextResolution,
+        },
+      );
+
+      label.setOrigin(0.5);
+      label.setDepth(1);
+      this.entranceCounterLabels.push(label);
+    });
+  }
+
+  private createConstructionPieceButtonAreas(
+    gridArea: GridArea,
+    floatingMenuOffsetX = 0,
+  ): readonly ConstructionPieceButtonArea[] {
+    const layout = this.getFloatingMenuLayout(gridArea, floatingMenuOffsetX);
+    const buttonWidth = layout.pieceButtonWidth;
+    const buttonHeight = layout.pieceButtonHeight;
+    const gap = layout.rowGap;
+    const x = layout.contentX;
+    const y = layout.pieceFirstY;
+
+    return [
+      {
+        height: buttonHeight,
+        pieceType: ConstructionPieceType.Gallery,
+        width: buttonWidth,
+        x,
+        y,
+      },
+      {
+        height: buttonHeight,
+        pieceType: ConstructionPieceType.Room,
+        width: buttonWidth,
+        x,
+        y: y + buttonHeight + gap,
+      },
+    ];
+  }
+
+  private drawConstructionPiecePanel(
+    gridArea: GridArea,
+    selectedPieceType: ConstructionPieceType,
+  ): void {
+    if (this.constructionPieceButtonAreas.length === 0) {
+      return;
+    }
+
+    const panelX = Math.min(
+      ...this.constructionPieceButtonAreas.map((area) => area.x),
+    );
+    const panelY = Math.min(
+      ...this.constructionPieceButtonAreas.map((area) => area.y),
+    );
+    const titleGap = Math.max(8, gridArea.cellSize * 0.12);
+
+    const title = this.gameObjects.text(
+      panelX,
+      panelY - titleGap,
+      'Pi\u00e8ces :',
+      {
+        color: constructionGridPalette.textWarning,
+        fontFamily: 'Arial, Helvetica, sans-serif',
+        fontSize: `${Math.max(11, Math.round(gridArea.cellSize * 0.16))}px`,
+        fontStyle: '700',
+        resolution: constructionTextResolution,
+      },
+    );
+
+    title.setOrigin(0, 1);
+    title.setDepth(1);
+    this.entranceCounterLabels.push(title);
+
+    this.constructionPieceButtonAreas.forEach((area) => {
+      this.drawConstructionPieceButton(gridArea, area, selectedPieceType);
+    });
+  }
+
+  private drawConstructionPieceButton(
+    gridArea: GridArea,
+    area: ConstructionPieceButtonArea,
+    selectedPieceType: ConstructionPieceType,
+  ): void {
+    const isActive = area.pieceType === selectedPieceType;
+    const cornerRadius = Math.max(6, gridArea.cellSize * 0.1);
+    const fillColor = isActive
+      ? constructionGridPalette.toolButtonActiveFill
+      : constructionGridPalette.toolButtonInactiveFill;
+    const borderColor = isActive
+      ? constructionGridPalette.ghostStroke
+      : constructionGridPalette.gridBorder;
+
+    this.graphics.fillStyle(fillColor, isActive ? 0.95 : 0.86);
+    this.graphics.fillRoundedRect(
+      area.x,
+      area.y,
+      area.width,
+      area.height,
+      cornerRadius,
+    );
+    this.graphics.lineStyle(2, borderColor, isActive ? 0.9 : 0.55);
+    this.graphics.strokeRoundedRect(
+      area.x,
+      area.y,
+      area.width,
+      area.height,
+      cornerRadius,
+    );
+
+    const pieceLabel = constructionPieceTypeLabels[area.pieceType];
+    const pieceCount = this.getConstructionPieceCount(area.pieceType);
+    const textColor = isActive
+      ? constructionGridPalette.textWarning
+      : '#b4b5aa';
+    const keyLabel = this.gameObjects.text(
+      area.x + area.height * 0.5,
+      area.y + area.height / 2,
+      pieceLabel.keyLabel,
+      {
+        color: textColor,
+        fontFamily: 'Arial, Helvetica, sans-serif',
+        fontSize: `${Math.max(12, Math.round(gridArea.cellSize * 0.18))}px`,
+        fontStyle: '700',
+        resolution: constructionTextResolution,
+      },
+    );
+
+    keyLabel.setOrigin(0.5);
+    keyLabel.setDepth(1);
+    this.entranceCounterLabels.push(keyLabel);
+
+    const nameLabel = this.gameObjects.text(
+      area.x + area.height * 0.95,
+      area.y + area.height / 2,
+      pieceLabel.nameLabel,
+      {
+        color: textColor,
+        fontFamily: 'Arial, Helvetica, sans-serif',
+        fontSize: `${Math.max(11, Math.round(gridArea.cellSize * 0.16))}px`,
+        fontStyle: '700',
+        resolution: constructionTextResolution,
+      },
+    );
+
+    nameLabel.setOrigin(0, 0.5);
+    nameLabel.setDepth(1);
+    this.entranceCounterLabels.push(nameLabel);
+
+    const countLabel = this.gameObjects.text(
+      area.x + area.width - area.height * 2.2,
+      area.y + area.height / 2,
+      `x${pieceCount}`,
+      {
+        color: isActive ? '#f6d98a' : '#8f927f',
+        fontFamily: 'Arial, Helvetica, sans-serif',
+        fontSize: `${Math.max(10, Math.round(gridArea.cellSize * 0.14))}px`,
+        fontStyle: '700',
+        resolution: constructionTextResolution,
+      },
+    );
+
+    countLabel.setOrigin(1, 0.5);
+    countLabel.setDepth(1);
+    this.entranceCounterLabels.push(countLabel);
+
+    const costLabel = this.gameObjects.text(
+      area.x + area.width - area.height * 0.35,
+      area.y + area.height / 2,
+      pieceLabel.costLabel,
+      {
+        color: isActive ? '#f6d98a' : '#8f927f',
+        fontFamily: 'Arial, Helvetica, sans-serif',
+        fontSize: `${Math.max(10, Math.round(gridArea.cellSize * 0.14))}px`,
+        fontStyle: '700',
+        resolution: constructionTextResolution,
+      },
+    );
+
+    costLabel.setOrigin(1, 0.5);
+    costLabel.setDepth(1);
+    this.entranceCounterLabels.push(costLabel);
+  }
+
+  private getConstructionPieceCount(
+    pieceType: ConstructionPieceType,
+  ): number {
+    if (pieceType === ConstructionPieceType.Gallery) {
+      return this.constructionGrid.pieces.filter((piece) =>
+        this.isSingleCellPiece(piece),
+      ).length;
+    }
+
+    return this.constructionGrid.pieces.filter(
+      (piece) => this.isRoomPiece(piece) && piece.id !== queenChamberPieceId,
+    ).length;
+  }
+
   private drawHoveredGridCell(
     gridArea: GridArea,
     pointer: ConstructionGridPointer | undefined,
+    selectedPieceType: ConstructionPieceType,
   ): void {
     if (pointer === undefined) {
       return;
@@ -513,15 +1540,15 @@ export class ConstructionGridRenderer {
 
     const x = gridArea.x + position.column * gridArea.cellSize;
     const y = gridArea.y + position.row * gridArea.cellSize;
-    const isOccupied = isGridPositionOccupied(this.constructionGrid, {
-      column: position.column,
-      row: position.row,
-    });
-    const hoverColor = isOccupied
+    const isBlocked = !this.canPlaceConstructionPieceAtPosition(
+      position,
+      selectedPieceType,
+    );
+    const hoverColor = isBlocked
       ? constructionGridPalette.gridBlockedHover
       : constructionGridPalette.gridHover;
-    const fillAlpha = isOccupied ? 0.1 : 0.08;
-    const strokeAlpha = isOccupied ? 0.55 : 0.42;
+    const fillAlpha = isBlocked ? 0.1 : 0.08;
+    const strokeAlpha = isBlocked ? 0.55 : 0.42;
 
     this.graphics.fillStyle(hoverColor, fillAlpha);
     this.graphics.fillRect(x, y, gridArea.cellSize, gridArea.cellSize);
@@ -529,9 +1556,215 @@ export class ConstructionGridRenderer {
     this.graphics.strokeRect(x, y, gridArea.cellSize, gridArea.cellSize);
   }
 
+  private drawToolPreview(
+    gridArea: GridArea,
+    pointer: ConstructionGridPointer | undefined,
+    toolMode: ConstructionToolMode,
+    selectedPieceType: ConstructionPieceType,
+  ): void {
+    if (pointer === undefined) {
+      return;
+    }
+
+    const position = this.getGridPositionAtPoint(gridArea, pointer);
+
+    if (position === undefined) {
+      return;
+    }
+
+    this.drawHoveredGridCell(gridArea, pointer, selectedPieceType);
+
+    if (toolMode === ConstructionToolMode.Destroy) {
+      this.drawRemovalPreview(gridArea, position);
+      return;
+    }
+
+    if (isGridPositionOccupied(this.constructionGrid, position)) {
+      return;
+    }
+
+    const piece = this.createConstructionPieceForPosition(
+      position,
+      selectedPieceType,
+    );
+    const canPlace = this.canPlaceConstructionPieceAtPosition(
+      position,
+      selectedPieceType,
+    );
+
+    this.drawPlacementGhost(gridArea, piece, canPlace);
+  }
+
+  private drawActionHintLabel(
+    gridArea: GridArea,
+    pointer: ConstructionGridPointer | undefined,
+    toolMode: ConstructionToolMode,
+    selectedPieceType: ConstructionPieceType,
+  ): void {
+    if (pointer === undefined) {
+      return;
+    }
+
+    const position = this.getGridPositionAtPoint(gridArea, pointer);
+
+    if (position === undefined) {
+      return;
+    }
+
+    const hintText = this.getActionHintText(
+      position,
+      toolMode,
+      selectedPieceType,
+    );
+    const label = this.gameObjects.text(
+      gridArea.x + gridArea.width / 2,
+      gridArea.y + gridArea.height - gridArea.cellSize * 0.24,
+      hintText,
+      {
+        align: 'center',
+        color: constructionGridPalette.textWarning,
+        fontFamily: 'Arial, Helvetica, sans-serif',
+        fontSize: `${Math.max(10, Math.round(gridArea.cellSize * 0.16))}px`,
+        fontStyle: '700',
+        resolution: constructionTextResolution,
+      },
+    );
+
+    label.setOrigin(0.5);
+    label.setShadow(
+      1,
+      1,
+      constructionGridPalette.textShadow,
+      2,
+      true,
+      true,
+    );
+    label.setDepth(1);
+    this.actionHintLabel = label;
+  }
+
+  private getActionHintText(
+    position: ConstructionGridPosition,
+    toolMode: ConstructionToolMode,
+    selectedPieceType: ConstructionPieceType,
+  ): string {
+    if (toolMode === ConstructionToolMode.Destroy) {
+      return this.getDestroyActionHintText(position);
+    }
+
+    return this.getBuildActionHintText(position, selectedPieceType);
+  }
+
+  private getBuildActionHintText(
+    position: ConstructionGridPosition,
+    selectedPieceType: ConstructionPieceType,
+  ): string {
+    if (isGridPositionOccupied(this.constructionGrid, position)) {
+      return 'Case occup\u00e9e';
+    }
+
+    const piece = this.createConstructionPieceForPosition(
+      position,
+      selectedPieceType,
+    );
+
+    if (this.wouldExceedRoomEntranceLimit(piece)) {
+      return 'Limite d\u2019entr\u00e9es atteinte';
+    }
+
+    if (!this.canPlaceConstructionPieceAtPosition(position, selectedPieceType)) {
+      return 'Doit toucher le r\u00e9seau de la reine';
+    }
+
+    return 'Construire ici';
+  }
+
+  private getDestroyActionHintText(position: ConstructionGridPosition): string {
+    const piece = this.findPieceAtPosition(position);
+
+    if (piece === undefined) {
+      return 'Aucune pi\u00e8ce \u00e0 d\u00e9truire';
+    }
+
+    return 'D\u00e9truire cette pi\u00e8ce';
+  }
+
+  private drawRemovalPreview(
+    gridArea: GridArea,
+    position: ConstructionGridPosition,
+  ): void {
+    const piece = this.findPieceAtPosition(position);
+
+    if (piece === undefined) {
+      return;
+    }
+
+    this.drawRemovalPreviewOverlay(gridArea, piece);
+  }
+
+  private drawRemovalPreviewOverlay(
+    gridArea: GridArea,
+    piece: GalleryPiece,
+  ): void {
+    const rect = this.getGalleryRect(gridArea, piece);
+    const padding = gridArea.cellSize * 0.08;
+    const cornerRadius = this.isRoomPiece(piece) ? gridArea.cellSize * 0.28 : 0;
+
+    this.graphics.fillStyle(constructionGridPalette.ghostFill, 0.2);
+    this.graphics.fillRoundedRect(
+      rect.x + padding,
+      rect.y + padding,
+      rect.width - padding * 2,
+      rect.height - padding * 2,
+      cornerRadius,
+    );
+    this.graphics.lineStyle(3, constructionGridPalette.ghostStroke, 0.82);
+    this.graphics.strokeRoundedRect(
+      rect.x + padding,
+      rect.y + padding,
+      rect.width - padding * 2,
+      rect.height - padding * 2,
+      cornerRadius,
+    );
+  }
+
+  private drawPlacementGhost(
+    gridArea: GridArea,
+    piece: GalleryPiece,
+    canPlace: boolean,
+  ): void {
+    const rect = this.getGalleryRect(gridArea, piece);
+    const padding = gridArea.cellSize * 0.16;
+    const cornerRadius = gridArea.cellSize * 0.2;
+    const fillColor = canPlace
+      ? constructionGridPalette.ghostFill
+      : constructionGridPalette.ghostBlockedFill;
+    const strokeColor = canPlace
+      ? constructionGridPalette.ghostStroke
+      : constructionGridPalette.ghostBlockedStroke;
+
+    this.graphics.fillStyle(fillColor, canPlace ? 0.42 : 0.32);
+    this.graphics.fillRoundedRect(
+      rect.x + padding,
+      rect.y + padding,
+      rect.width - padding * 2,
+      rect.height - padding * 2,
+      cornerRadius,
+    );
+    this.graphics.lineStyle(2, strokeColor, 0.78);
+    this.graphics.strokeRoundedRect(
+      rect.x + padding,
+      rect.y + padding,
+      rect.width - padding * 2,
+      rect.height - padding * 2,
+      cornerRadius,
+    );
+  }
+
   private drawSelectedGridCell(
     gridArea: GridArea,
     selectedPosition: ConstructionGridPosition | undefined,
+    selectedPieceType: ConstructionPieceType,
   ): void {
     if (selectedPosition === undefined) {
       return;
@@ -539,11 +1772,11 @@ export class ConstructionGridRenderer {
 
     const x = gridArea.x + selectedPosition.column * gridArea.cellSize;
     const y = gridArea.y + selectedPosition.row * gridArea.cellSize;
-    const isOccupied = isGridPositionOccupied(
-      this.constructionGrid,
+    const isBlocked = !this.canPlaceConstructionPieceAtPosition(
       selectedPosition,
+      selectedPieceType,
     );
-    const selectionColor = isOccupied
+    const selectionColor = isBlocked
       ? constructionGridPalette.gridBlockedSelection
       : constructionGridPalette.gridSelection;
 
@@ -551,6 +1784,167 @@ export class ConstructionGridRenderer {
     this.graphics.fillRect(x, y, gridArea.cellSize, gridArea.cellSize);
     this.graphics.lineStyle(3, selectionColor, 0.78);
     this.graphics.strokeRect(x, y, gridArea.cellSize, gridArea.cellSize);
+  }
+
+  private drawSelectedPiece(
+    gridArea: GridArea,
+    selectedPosition: ConstructionGridPosition | undefined,
+  ): void {
+    if (selectedPosition === undefined) {
+      return;
+    }
+
+    const piece = this.findPieceAtPosition(selectedPosition);
+
+    if (piece === undefined) {
+      return;
+    }
+
+    const rect = this.getGalleryRect(gridArea, piece);
+    const padding = gridArea.cellSize * 0.06;
+    const cornerRadius = this.isRoomPiece(piece)
+      ? gridArea.cellSize * 0.32
+      : gridArea.cellSize * 0.16;
+
+    this.graphics.lineStyle(3, constructionGridPalette.pieceSelection, 0.94);
+    this.graphics.strokeRoundedRect(
+      rect.x + padding,
+      rect.y + padding,
+      rect.width - padding * 2,
+      rect.height - padding * 2,
+      cornerRadius,
+    );
+    this.graphics.lineStyle(1, constructionGridPalette.pieceSelection, 0.42);
+    this.graphics.strokeRoundedRect(
+      rect.x + padding * 2,
+      rect.y + padding * 2,
+      rect.width - padding * 4,
+      rect.height - padding * 4,
+      cornerRadius * 0.75,
+    );
+  }
+
+  private drawSelectedInfoLabel(
+    gridArea: GridArea,
+    selectedPosition: ConstructionGridPosition | undefined,
+  ): void {
+    if (selectedPosition === undefined) {
+      return;
+    }
+
+    const piece = this.findPieceAtPosition(selectedPosition);
+
+    if (piece === undefined) {
+      return;
+    }
+
+    const label = this.gameObjects.text(
+      gridArea.x + gridArea.width,
+      gridArea.y - gridArea.cellSize * 0.22,
+      this.getSelectedPieceLabel(piece),
+      {
+        color: constructionGridPalette.textWarning,
+        fontFamily: 'Arial, Helvetica, sans-serif',
+        fontSize: `${Math.max(10, Math.round(gridArea.cellSize * 0.16))}px`,
+        fontStyle: '700',
+        resolution: constructionTextResolution,
+      },
+    );
+
+    label.setOrigin(1, 0.5);
+    label.setShadow(
+      1,
+      1,
+      constructionGridPalette.textShadow,
+      2,
+      true,
+      true,
+    );
+    label.setDepth(1);
+    this.selectedInfoLabel = label;
+  }
+
+  private drawNetworkStatusLabel(
+    gridArea: GridArea,
+    floatingMenuOffsetX: number,
+  ): void {
+    const layout = this.getFloatingMenuLayout(gridArea, floatingMenuOffsetX);
+    const connectedPieceIds = this.getQueenNetworkPieceIds();
+    const isolatedPieceCount =
+      this.constructionGrid.pieces.length - connectedPieceIds.size;
+    const queenChamber = this.findQueenChamber();
+    const isNetworkComplete =
+      queenChamber !== undefined && isolatedPieceCount === 0;
+    const indicatorRadius = Math.max(5, gridArea.cellSize * 0.085);
+    const indicatorX = layout.contentX + indicatorRadius;
+    const indicatorY = layout.networkY;
+    const indicatorColor = isNetworkComplete
+      ? constructionGridPalette.networkConnected
+      : constructionGridPalette.networkDisconnected;
+
+    this.graphics.fillStyle(indicatorColor, 0.95);
+    this.graphics.fillCircle(indicatorX, indicatorY, indicatorRadius);
+    this.graphics.lineStyle(2, constructionGridPalette.ghostStroke, 0.35);
+    this.graphics.strokeCircle(indicatorX, indicatorY, indicatorRadius);
+
+    const label = this.gameObjects.text(
+      indicatorX + indicatorRadius * 2.2,
+      indicatorY,
+      this.getQueenNetworkStatusText(queenChamber, isolatedPieceCount),
+      {
+        color: isNetworkComplete
+          ? '#9fbf73'
+          : constructionGridPalette.entranceTextFull,
+        fontFamily: 'Arial, Helvetica, sans-serif',
+        fontSize: `${Math.max(10, Math.round(gridArea.cellSize * 0.16))}px`,
+        fontStyle: '700',
+        resolution: constructionTextResolution,
+      },
+    );
+
+    label.setOrigin(0, 0.5);
+    label.setShadow(
+      1,
+      1,
+      constructionGridPalette.textShadow,
+      2,
+      true,
+      true,
+    );
+    label.setDepth(1);
+    this.networkStatusLabel = label;
+  }
+
+  private getQueenNetworkStatusText(
+    queenChamber: GalleryPiece | undefined,
+    isolatedPieceCount: number,
+  ): string {
+    if (queenChamber === undefined) {
+      return 'Reine absente';
+    }
+
+    if (isolatedPieceCount === 0) {
+      return 'R\u00e9seau reine complet';
+    }
+
+    return `Hors r\u00e9seau reine : ${isolatedPieceCount}`;
+  }
+
+  private getSelectedPieceLabel(piece: GalleryPiece): string {
+    if (!this.isRoomPiece(piece)) {
+      return 'S\u00e9lection : Galerie';
+    }
+
+    if (piece.entranceLimit === undefined) {
+      return 'S\u00e9lection : Chambre';
+    }
+
+    const entranceCount = countGalleryPieceEntrances(
+      this.constructionGrid,
+      piece,
+    );
+
+    return `S\u00e9lection : Chambre - ${entranceCount}/${piece.entranceLimit} entr\u00e9es`;
   }
 
   private getGridPositionAtPoint(
@@ -593,6 +1987,18 @@ export class ConstructionGridRenderer {
     this.drawRoomSurfaces(gridArea, pieces);
     this.drawGalleryHighlights(gridArea, pieces);
     this.drawGalleryOuterBorders(gridArea, pieces);
+    this.drawNetworkStatusHighlights(gridArea, pieces);
+    this.drawRoomEntranceMarkers(gridArea, pieces);
+    this.drawRoomEntranceCounters(gridArea, pieces);
+  }
+
+  public destroy(): void {
+    this.clearActionHintLabel();
+    this.clearEntranceCounterLabels();
+    this.clearNetworkStatusLabel();
+    this.clearQueenStatusLabel();
+    this.clearSelectedInfoLabel();
+    this.clearToolModeLabel();
   }
 
   private drawRoomSurfaces(
@@ -629,6 +2035,80 @@ export class ConstructionGridRenderer {
         rect.height * 0.22,
       );
     });
+  }
+
+  private drawQueenAnchor(gridArea: GridArea): void {
+    const queenChamber = this.findQueenChamber();
+
+    if (queenChamber === undefined) {
+      return;
+    }
+
+    const rect = this.getGalleryRect(gridArea, queenChamber);
+    const centerX = rect.x + rect.width / 2;
+    const centerY = rect.y + rect.height / 2;
+    const bodyWidth = rect.width * 0.36;
+    const bodyHeight = rect.height * 0.28;
+    const headRadius = Math.max(4, gridArea.cellSize * 0.12);
+
+    this.graphics.fillStyle(constructionGridPalette.queenBody, 0.9);
+    this.graphics.fillEllipse(
+      centerX,
+      centerY + bodyHeight * 0.22,
+      bodyWidth,
+      bodyHeight,
+    );
+    this.graphics.fillStyle(constructionGridPalette.queenAccent, 0.92);
+    this.graphics.fillCircle(centerX, centerY - bodyHeight * 0.3, headRadius);
+    this.graphics.lineStyle(2, constructionGridPalette.queenAccent, 0.72);
+    this.graphics.lineBetween(
+      centerX - headRadius * 1.4,
+      centerY - bodyHeight * 0.85,
+      centerX,
+      centerY - bodyHeight * 1.18,
+    );
+    this.graphics.lineBetween(
+      centerX,
+      centerY - bodyHeight * 1.18,
+      centerX + headRadius * 1.4,
+      centerY - bodyHeight * 0.85,
+    );
+    this.drawQueenStatusLabel(gridArea, rect);
+  }
+
+  private drawQueenStatusLabel(
+    gridArea: GridArea,
+    rect: GalleryRect,
+  ): void {
+    const queenNetworkPieceIds = this.getQueenNetworkPieceIds();
+    const isNetworkComplete =
+      queenNetworkPieceIds.size === this.constructionGrid.pieces.length;
+    const label = this.gameObjects.text(
+      rect.x + rect.width / 2,
+      rect.y - gridArea.cellSize * 0.18,
+      isNetworkComplete ? 'Connect\u00e9' : 'Non connect\u00e9',
+      {
+        color: isNetworkComplete
+          ? '#9fbf73'
+          : constructionGridPalette.entranceTextFull,
+        fontFamily: 'Arial, Helvetica, sans-serif',
+        fontSize: `${Math.max(9, Math.round(gridArea.cellSize * 0.13))}px`,
+        fontStyle: '700',
+        resolution: constructionTextResolution,
+      },
+    );
+
+    label.setOrigin(0.5);
+    label.setShadow(
+      1,
+      1,
+      constructionGridPalette.textShadow,
+      2,
+      true,
+      true,
+    );
+    label.setDepth(1);
+    this.queenStatusLabel = label;
   }
 
   private drawGalleryLayer(
@@ -748,6 +2228,134 @@ export class ConstructionGridRenderer {
     });
   }
 
+  private drawNetworkStatusHighlights(
+    gridArea: GridArea,
+    pieces: readonly GalleryPiece[],
+  ): void {
+    const connectedPieceIds = this.getQueenNetworkPieceIds();
+
+    pieces.forEach((piece) => {
+      const isConnected = connectedPieceIds.has(piece.id);
+      const color = isConnected
+        ? constructionGridPalette.networkConnected
+        : constructionGridPalette.networkDisconnected;
+      const alpha = isConnected ? 0.34 : 0.42;
+
+      this.drawNetworkStatusHighlight(gridArea, piece, color, alpha);
+    });
+  }
+
+  private drawNetworkStatusHighlight(
+    gridArea: GridArea,
+    piece: GalleryPiece,
+    color: number,
+    alpha: number,
+  ): void {
+    const rect = this.getGalleryRect(gridArea, piece);
+    const padding = gridArea.cellSize * 0.04;
+    const cornerRadius = this.isRoomPiece(piece)
+      ? gridArea.cellSize * 0.28
+      : gridArea.cellSize * 0.1;
+
+    this.graphics.lineStyle(2, color, alpha);
+    this.graphics.strokeRoundedRect(
+      rect.x + padding,
+      rect.y + padding,
+      rect.width - padding * 2,
+      rect.height - padding * 2,
+      cornerRadius,
+    );
+  }
+
+  private drawRoomEntranceMarkers(
+    gridArea: GridArea,
+    pieces: readonly GalleryPiece[],
+  ): void {
+    const markerRadius = Math.max(3, gridArea.cellSize * 0.075);
+
+    pieces
+      .filter((piece) => this.isRoomPiece(piece))
+      .forEach((roomPiece) => {
+        const markers = this.getRoomEntranceMarkers(
+          gridArea,
+          roomPiece,
+          pieces,
+        );
+        const markerColor = this.isRoomEntranceLimitReached(roomPiece)
+          ? constructionGridPalette.entranceMarkerFull
+          : constructionGridPalette.entranceMarker;
+
+        markers.forEach((marker) => {
+          this.graphics.fillStyle(markerColor, 0.9);
+          this.graphics.fillCircle(marker.x, marker.y, markerRadius);
+          this.graphics.lineStyle(
+            2,
+            constructionGridPalette.entranceMarkerBorder,
+            0.74,
+          );
+          this.graphics.strokeCircle(marker.x, marker.y, markerRadius);
+        });
+      });
+  }
+
+  private getRoomEntranceMarkers(
+    gridArea: GridArea,
+    roomPiece: GalleryPiece,
+    pieces: readonly GalleryPiece[],
+  ): readonly EntranceMarker[] {
+    const markers: EntranceMarker[] = [];
+    const roomPositions = getGalleryPieceOccupiedPositions(roomPiece);
+
+    pieces.forEach((candidate) => {
+      if (candidate.id === roomPiece.id) {
+        return;
+      }
+
+      getGalleryPieceOccupiedPositions(candidate).forEach(
+        (candidatePosition) => {
+          roomPositions.forEach((roomPosition) => {
+            try {
+              const direction = getDirectionBetweenAdjacentPositions(
+                roomPosition,
+                candidatePosition,
+              );
+
+              markers.push(
+                this.getEntranceMarkerPosition(gridArea, roomPosition, direction),
+              );
+            } catch (error) {
+              if (!(error instanceof RangeError)) {
+                throw error;
+              }
+            }
+          });
+        },
+      );
+    });
+
+    return markers;
+  }
+
+  private getEntranceMarkerPosition(
+    gridArea: GridArea,
+    roomPosition: ConstructionGridPosition,
+    direction: GridDirection,
+  ): EntranceMarker {
+    const center = this.getCellCenter(gridArea, roomPosition);
+    const offset = gridArea.cellSize * 0.5;
+
+    switch (direction) {
+      case GridDirection.Down:
+        return { x: center.x, y: center.y + offset };
+      case GridDirection.Left:
+        return { x: center.x - offset, y: center.y };
+      case GridDirection.Right:
+        return { x: center.x + offset, y: center.y };
+      case GridDirection.Up:
+        return { x: center.x, y: center.y - offset };
+    }
+  }
+
   private drawGalleryPieceOuterBorders(
     gridArea: GridArea,
     piece: GalleryPiece,
@@ -865,6 +2473,100 @@ export class ConstructionGridRenderer {
       right: hasRight,
       up: hasUp,
     });
+  }
+
+  private drawRoomEntranceCounters(
+    gridArea: GridArea,
+    pieces: readonly GalleryPiece[],
+  ): void {
+    pieces
+      .filter(
+        (piece) => this.isRoomPiece(piece) && piece.entranceLimit !== undefined,
+      )
+      .forEach((roomPiece) => {
+        const rect = this.getGalleryRect(gridArea, roomPiece);
+        const usedEntrances = countGalleryPieceEntrances(
+          this.constructionGrid,
+          roomPiece,
+        );
+        const entranceLimit = roomPiece.entranceLimit;
+
+        if (entranceLimit === undefined) {
+          return;
+        }
+
+        const counterColor =
+          usedEntrances >= entranceLimit
+            ? constructionGridPalette.entranceTextFull
+            : constructionGridPalette.textWarning;
+
+        const label = this.gameObjects.text(
+          rect.x + rect.width / 2,
+          rect.y + rect.height / 2,
+          `${usedEntrances}/${entranceLimit}`,
+          {
+            color: counterColor,
+            fontFamily: 'Arial, Helvetica, sans-serif',
+            fontSize: `${Math.max(10, Math.round(gridArea.cellSize * 0.22))}px`,
+            fontStyle: '700',
+        resolution: constructionTextResolution,
+          },
+        );
+
+        label.setOrigin(0.5);
+        label.setShadow(
+          1,
+          1,
+          constructionGridPalette.textShadow,
+          2,
+          true,
+          true,
+        );
+        label.setDepth(1);
+        this.entranceCounterLabels.push(label);
+      });
+  }
+
+  private isRoomEntranceLimitReached(roomPiece: GalleryPiece): boolean {
+    const entranceLimit = roomPiece.entranceLimit;
+
+    return (
+      entranceLimit !== undefined &&
+      countGalleryPieceEntrances(this.constructionGrid, roomPiece) >=
+        entranceLimit
+    );
+  }
+
+  private clearEntranceCounterLabels(): void {
+    this.entranceCounterLabels.forEach((label) => {
+      label.destroy();
+    });
+    this.entranceCounterLabels = [];
+  }
+
+  private clearActionHintLabel(): void {
+    this.actionHintLabel?.destroy();
+    this.actionHintLabel = undefined;
+  }
+
+  private clearNetworkStatusLabel(): void {
+    this.networkStatusLabel?.destroy();
+    this.networkStatusLabel = undefined;
+  }
+
+  private clearQueenStatusLabel(): void {
+    this.queenStatusLabel?.destroy();
+    this.queenStatusLabel = undefined;
+  }
+
+  private clearToolModeLabel(): void {
+    this.toolModeLabel?.destroy();
+    this.toolModeLabel = undefined;
+  }
+
+  private clearSelectedInfoLabel(): void {
+    this.selectedInfoLabel?.destroy();
+    this.selectedInfoLabel = undefined;
   }
 
   private eraseConnectedBorderSeams(
@@ -1001,7 +2703,13 @@ export class ConstructionGridRenderer {
     this.graphics.strokeCircle(center.x, center.y, radius);
     this.graphics.fillStyle(constructionGridPalette.conduitInner, 0.95);
     this.graphics.fillCircle(center.x, center.y, radius * 0.55);
-    this.drawConduitDirection(center.x, center.y, radius, conduit.direction);
+    this.drawConduitDirection(
+      center.x,
+      center.y,
+      radius,
+      conduit.direction,
+      constructionGridPalette.conduitBorder,
+    );
   }
 
   private getCellCenter(
@@ -1019,13 +2727,14 @@ export class ConstructionGridRenderer {
     y: number,
     radius: number,
     direction: GridDirection,
+    color: number,
   ): void {
     const angle = this.getDirectionAngle(direction);
     const arrowLength = radius * 0.85;
     const endX = x + Math.cos(angle) * arrowLength;
     const endY = y + Math.sin(angle) * arrowLength;
 
-    this.graphics.lineStyle(2, constructionGridPalette.conduitBorder, 0.85);
+    this.graphics.lineStyle(2, color, 0.85);
     this.graphics.lineBetween(x, y, endX, endY);
   }
 
@@ -1042,3 +2751,4 @@ export class ConstructionGridRenderer {
     }
   }
 }
+

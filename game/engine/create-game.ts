@@ -17,6 +17,7 @@ export async function createGame(
     render: {
       antialias: true,
       pixelArt: false,
+      roundPixels: true,
     },
     scale: {
       mode: Phaser.Scale.RESIZE,

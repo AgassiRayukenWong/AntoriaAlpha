@@ -17,6 +17,7 @@ export interface ConstructionGridPosition {
 
 export interface GalleryPiece {
   readonly connections: readonly GridDirection[];
+  readonly entranceLimit?: number;
   readonly id: string;
   readonly position: ConstructionGridPosition;
   readonly size: ConstructionGridSize;
@@ -128,6 +129,51 @@ export const placeGalleryPiece = (
   };
 };
 
+export const canPlaceGalleryPieceNextToNetwork = (
+  grid: ConstructionGrid,
+  piece: GalleryPiece,
+  conduit: ConstructionGridConduit,
+): boolean => {
+  let nextGrid: ConstructionGrid;
+
+  try {
+    nextGrid = placeGalleryPiece(grid, piece);
+  } catch (error) {
+    if (error instanceof RangeError) {
+      return false;
+    }
+
+    throw error;
+  }
+
+  if (!hasAvailableRoomEntranceCapacity(nextGrid)) {
+    return false;
+  }
+
+  if (isGalleryPieceConnectedToConduit(piece, conduit)) {
+    return true;
+  }
+
+  const conduitConnectedPieceIds = getConduitConnectedPieceIds(grid, conduit);
+
+  return grid.pieces.some(
+    (existingPiece) =>
+      conduitConnectedPieceIds.has(existingPiece.id) &&
+      areGalleryPiecesPlacementLinked(piece, existingPiece),
+  );
+};
+
+export const countGalleryPieceEntrances = (
+  grid: ConstructionGrid,
+  piece: GalleryPiece,
+): number => {
+  return grid.pieces
+    .filter((candidate) => candidate.id !== piece.id)
+    .reduce((entranceCount, candidate) => {
+      return entranceCount + countAdjacentPositionPairs(piece, candidate);
+    }, 0);
+};
+
 export const removeGalleryPiece = (
   grid: ConstructionGrid,
   pieceId: string,
@@ -140,6 +186,27 @@ export const removeGalleryPiece = (
     size: grid.size,
     pieces: grid.pieces.filter((piece) => piece.id !== pieceId),
   };
+};
+
+export const canRemoveGalleryPieceWithoutDisconnectingNetwork = (
+  grid: ConstructionGrid,
+  pieceId: string,
+  conduit: ConstructionGridConduit,
+): boolean => {
+  try {
+    const nextGrid = removeGalleryPiece(grid, pieceId);
+
+    return (
+      nextGrid.pieces.length === 0 ||
+      isGalleryNetworkConnectedToConduit(nextGrid, conduit)
+    );
+  } catch (error) {
+    if (error instanceof RangeError) {
+      return false;
+    }
+
+    throw error;
+  }
 };
 
 const assertUniquePieceIds = (pieces: readonly GalleryPiece[]): void => {
@@ -226,10 +293,28 @@ export const areGalleryPiecesConnected = (
   );
 };
 
+export const areGalleryPiecesAdjacent = (
+  firstPiece: GalleryPiece,
+  secondPiece: GalleryPiece,
+): boolean => {
+  return getGalleryPieceOccupiedPositions(firstPiece).some((firstPosition) =>
+    getGalleryPieceOccupiedPositions(secondPiece).some((secondPosition) =>
+      areAdjacentPositions(firstPosition, secondPosition),
+    ),
+  );
+};
+
 export const isGalleryNetworkConnected = (
   grid: ConstructionGrid,
   startPieceId: string,
 ): boolean => {
+  return getGalleryNetworkPieceIds(grid, startPieceId).size === grid.pieces.length;
+};
+
+export const getGalleryNetworkPieceIds = (
+  grid: ConstructionGrid,
+  startPieceId: string,
+): ReadonlySet<string> => {
   if (!isGalleryPieceIdUsed(grid, startPieceId)) {
     throw new RangeError(`Gallery piece id ${startPieceId} does not exist.`);
   }
@@ -250,14 +335,14 @@ export const isGalleryNetworkConnected = (
     for (const piece of grid.pieces) {
       if (
         !visitedPieceIds.has(piece.id) &&
-        areGalleryPiecesConnected(currentPiece, piece)
+        areGalleryPiecesNetworkLinked(currentPiece, piece)
       ) {
         pieceIdsToVisit.push(piece.id);
       }
     }
   }
 
-  return visitedPieceIds.size === grid.pieces.length;
+  return visitedPieceIds;
 };
 
 export const isGalleryNetworkConnectedToConduit = (
@@ -268,12 +353,19 @@ export const isGalleryNetworkConnectedToConduit = (
     return false;
   }
 
+  return getConduitConnectedPieceIds(grid, conduit).size === grid.pieces.length;
+};
+
+export const getConduitConnectedPieceIds = (
+  grid: ConstructionGrid,
+  conduit: ConstructionGridConduit,
+): ReadonlySet<string> => {
   const conduitConnectedPieces = grid.pieces.filter((piece) =>
     isGalleryPieceConnectedToConduit(piece, conduit),
   );
 
   if (conduitConnectedPieces.length === 0) {
-    return false;
+    return new Set<string>();
   }
 
   const visitedPieceIds = new Set<string>();
@@ -292,14 +384,78 @@ export const isGalleryNetworkConnectedToConduit = (
     for (const piece of grid.pieces) {
       if (
         !visitedPieceIds.has(piece.id) &&
-        areGalleryPiecesConnected(currentPiece, piece)
+        areGalleryPiecesNetworkLinked(currentPiece, piece)
       ) {
         pieceIdsToVisit.push(piece.id);
       }
     }
   }
 
-  return visitedPieceIds.size === grid.pieces.length;
+  return visitedPieceIds;
+};
+
+const areGalleryPiecesNetworkLinked = (
+  firstPiece: GalleryPiece,
+  secondPiece: GalleryPiece,
+): boolean => {
+  if (isRoomPiece(firstPiece) || isRoomPiece(secondPiece)) {
+    return areGalleryPiecesAdjacent(firstPiece, secondPiece);
+  }
+
+  return areGalleryPiecesConnected(firstPiece, secondPiece);
+};
+
+const areGalleryPiecesPlacementLinked = (
+  firstPiece: GalleryPiece,
+  secondPiece: GalleryPiece,
+): boolean => {
+  if (
+    isSingleCellGalleryPiece(firstPiece) &&
+    isSingleCellGalleryPiece(secondPiece)
+  ) {
+    return areGalleryPiecesAdjacent(firstPiece, secondPiece);
+  }
+
+  return areGalleryPiecesNetworkLinked(firstPiece, secondPiece);
+};
+
+const hasAvailableRoomEntranceCapacity = (grid: ConstructionGrid): boolean => {
+  return grid.pieces
+    .filter((piece) => isRoomPiece(piece) && piece.entranceLimit !== undefined)
+    .every((piece) => {
+      const entranceLimit = piece.entranceLimit;
+
+      return (
+        entranceLimit === undefined ||
+        countGalleryPieceEntrances(grid, piece) <= entranceLimit
+      );
+    });
+};
+
+const countAdjacentPositionPairs = (
+  firstPiece: GalleryPiece,
+  secondPiece: GalleryPiece,
+): number => {
+  return getGalleryPieceOccupiedPositions(firstPiece).reduce(
+    (entranceCount, firstPosition) => {
+      const adjacentCount = getGalleryPieceOccupiedPositions(
+        secondPiece,
+      ).filter((secondPosition) =>
+        areAdjacentPositions(firstPosition, secondPosition),
+      ).length;
+
+      return entranceCount + adjacentCount;
+    },
+    0,
+  );
+};
+
+const isSingleCellGalleryPiece = (piece: GalleryPiece): boolean => {
+  return piece.size.columns === 1 && piece.size.rows === 1;
+};
+
+const isRoomPiece = (piece: GalleryPiece): boolean => {
+  return piece.size.columns > 1 || piece.size.rows > 1;
 };
 
 const isGalleryPieceConnectedToConduit = (

@@ -3,9 +3,15 @@ import { describe, expect, it } from 'vitest';
 import {
   GridDirection,
   areAdjacentPositions,
+  areGalleryPiecesAdjacent,
   areGalleryPiecesConnected,
+  canRemoveGalleryPieceWithoutDisconnectingNetwork,
+  canPlaceGalleryPieceNextToNetwork,
+  countGalleryPieceEntrances,
   createConstructionGrid,
+  getConduitConnectedPieceIds,
   getDirectionBetweenAdjacentPositions,
+  getGalleryNetworkPieceIds,
   getGalleryPieceOccupiedPositions,
   getOppositeDirection,
   isGalleryPieceIdUsed,
@@ -24,8 +30,10 @@ const createPiece = (
   row: number,
   connections: readonly GridDirection[],
   size = { columns: 1, rows: 1 },
+  entranceLimit?: number,
 ): GalleryPiece => ({
   id,
+  ...(entranceLimit === undefined ? {} : { entranceLimit }),
   position: { column, row },
   size,
   connections,
@@ -181,6 +189,224 @@ describe('construction grid', () => {
     ).toThrow(RangeError);
   });
 
+  it('allows placing a gallery piece next to the conduit', () => {
+    const grid = createConstructionGrid({ columns: 4, rows: 3 });
+
+    expect(
+      canPlaceGalleryPieceNextToNetwork(
+        grid,
+        createPiece('entrance', 1, 0, [GridDirection.Up]),
+        {
+          position: { column: 1, row: -1 },
+          direction: GridDirection.Down,
+        },
+      ),
+    ).toBe(true);
+  });
+
+  it('allows placing a gallery piece next to the existing network', () => {
+    const grid = createConstructionGrid({ columns: 4, rows: 3 }, [
+      createPiece('entrance', 1, 0, [GridDirection.Up, GridDirection.Right]),
+    ]);
+
+    expect(
+      canPlaceGalleryPieceNextToNetwork(
+        grid,
+        createPiece('corridor', 2, 0, [GridDirection.Left]),
+        {
+          position: { column: 1, row: -1 },
+          direction: GridDirection.Down,
+        },
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects placing an isolated gallery piece away from the network', () => {
+    const grid = createConstructionGrid({ columns: 4, rows: 3 }, [
+      createPiece('entrance', 1, 0, [GridDirection.Up]),
+    ]);
+
+    expect(
+      canPlaceGalleryPieceNextToNetwork(
+        grid,
+        createPiece('isolated', 3, 2, [GridDirection.Left]),
+        {
+          position: { column: 1, row: -1 },
+          direction: GridDirection.Down,
+        },
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects placing a gallery piece next to a disconnected piece', () => {
+    const grid = createConstructionGrid({ columns: 5, rows: 3 }, [
+      createPiece('entrance', 1, 0, [GridDirection.Up]),
+      createPiece('isolated', 3, 1, [GridDirection.Right]),
+    ]);
+
+    expect(
+      canPlaceGalleryPieceNextToNetwork(
+        grid,
+        createPiece('isolated-extension', 4, 1, [GridDirection.Left]),
+        {
+          position: { column: 1, row: -1 },
+          direction: GridDirection.Down,
+        },
+      ),
+    ).toBe(false);
+  });
+
+  it('allows placing a gallery piece next to the conduit network when another piece is disconnected', () => {
+    const grid = createConstructionGrid({ columns: 5, rows: 3 }, [
+      createPiece('entrance', 1, 0, [GridDirection.Up, GridDirection.Right]),
+      createPiece('isolated', 4, 2, [GridDirection.Left]),
+    ]);
+
+    expect(
+      canPlaceGalleryPieceNextToNetwork(
+        grid,
+        createPiece('corridor', 2, 0, [GridDirection.Left]),
+        {
+          position: { column: 1, row: -1 },
+          direction: GridDirection.Down,
+        },
+      ),
+    ).toBe(true);
+  });
+
+  it('allows placing a vertical gallery from a connected horizontal gallery', () => {
+    const grid = createConstructionGrid({ columns: 5, rows: 3 }, [
+      createPiece('entrance', 1, 1, [
+        GridDirection.Up,
+        GridDirection.Right,
+      ]),
+      createPiece('horizontal', 2, 1, [
+        GridDirection.Left,
+        GridDirection.Right,
+      ]),
+    ]);
+
+    expect(
+      canPlaceGalleryPieceNextToNetwork(
+        grid,
+        createPiece('vertical-extension', 2, 0, [GridDirection.Down]),
+        {
+          position: { column: 1, row: 0 },
+          direction: GridDirection.Down,
+        },
+      ),
+    ).toBe(true);
+  });
+
+  it('allows placing a gallery piece next to a room connected to the conduit network', () => {
+    const grid = createConstructionGrid({ columns: 5, rows: 3 }, [
+      createPiece('entrance', 2, 0, [GridDirection.Up, GridDirection.Down]),
+      createPiece('room', 1, 1, [GridDirection.Right], {
+        columns: 2,
+        rows: 2,
+      }),
+    ]);
+
+    expect(
+      canPlaceGalleryPieceNextToNetwork(
+        grid,
+        createPiece('corridor', 1, 0, [GridDirection.Right]),
+        {
+          position: { column: 2, row: -1 },
+          direction: GridDirection.Down,
+        },
+      ),
+    ).toBe(true);
+  });
+
+  it('counts every adjacent cell as one room entrance', () => {
+    const room = createPiece(
+      'room',
+      1,
+      1,
+      [GridDirection.Up, GridDirection.Right, GridDirection.Down],
+      {
+        columns: 2,
+        rows: 2,
+      },
+      4,
+    );
+    const grid = createConstructionGrid({ columns: 5, rows: 4 }, [
+      room,
+      createPiece('top-left', 1, 0, [GridDirection.Down]),
+      createPiece('top-right', 2, 0, [GridDirection.Down]),
+      createPiece('right', 3, 1, [GridDirection.Left]),
+    ]);
+
+    expect(countGalleryPieceEntrances(grid, room)).toBe(3);
+  });
+
+  it('allows placing a gallery piece when a room reaches its entrance limit', () => {
+    const grid = createConstructionGrid({ columns: 5, rows: 4 }, [
+      createPiece('entrance', 1, 0, [GridDirection.Up, GridDirection.Down]),
+      createPiece(
+        'room',
+        1,
+        1,
+        [GridDirection.Up, GridDirection.Right, GridDirection.Down],
+        {
+          columns: 2,
+          rows: 2,
+        },
+        4,
+      ),
+      createPiece('top-right', 2, 0, [GridDirection.Down]),
+      createPiece('right', 3, 1, [GridDirection.Left]),
+    ]);
+
+    expect(
+      canPlaceGalleryPieceNextToNetwork(
+        grid,
+        createPiece('bottom', 1, 3, [GridDirection.Up]),
+        {
+          position: { column: 1, row: -1 },
+          direction: GridDirection.Down,
+        },
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects placing a gallery piece when a room would exceed its entrance limit', () => {
+    const grid = createConstructionGrid({ columns: 5, rows: 4 }, [
+      createPiece('entrance', 1, 0, [GridDirection.Up, GridDirection.Down]),
+      createPiece(
+        'room',
+        1,
+        1,
+        [
+          GridDirection.Up,
+          GridDirection.Right,
+          GridDirection.Down,
+          GridDirection.Left,
+        ],
+        {
+          columns: 2,
+          rows: 2,
+        },
+        4,
+      ),
+      createPiece('top-right', 2, 0, [GridDirection.Down]),
+      createPiece('right', 3, 1, [GridDirection.Left]),
+      createPiece('bottom', 1, 3, [GridDirection.Up]),
+    ]);
+
+    expect(
+      canPlaceGalleryPieceNextToNetwork(
+        grid,
+        createPiece('left', 0, 1, [GridDirection.Right]),
+        {
+          position: { column: 1, row: -1 },
+          direction: GridDirection.Down,
+        },
+      ),
+    ).toBe(false);
+  });
+
   it('removes a gallery piece from a new grid instance', () => {
     const firstPiece = createPiece('piece-1', 1, 1, [GridDirection.Right]);
     const secondPiece = createPiece('piece-2', 2, 1, [GridDirection.Left]);
@@ -212,6 +438,55 @@ describe('construction grid', () => {
     const grid = createConstructionGrid({ columns: 4, rows: 3 });
 
     expect(() => removeGalleryPiece(grid, 'missing-piece')).toThrow(RangeError);
+  });
+
+  it('allows removing a gallery piece that does not disconnect the conduit network', () => {
+    const grid = createConstructionGrid({ columns: 4, rows: 3 }, [
+      createPiece('entrance', 1, 0, [
+        GridDirection.Up,
+        GridDirection.Right,
+      ]),
+      createPiece('leaf', 2, 0, [GridDirection.Left]),
+    ]);
+
+    expect(
+      canRemoveGalleryPieceWithoutDisconnectingNetwork(grid, 'leaf', {
+        position: { column: 1, row: -1 },
+        direction: GridDirection.Down,
+      }),
+    ).toBe(true);
+  });
+
+  it('rejects removing a gallery piece that disconnects the conduit network', () => {
+    const grid = createConstructionGrid({ columns: 5, rows: 3 }, [
+      createPiece('entrance', 1, 0, [
+        GridDirection.Up,
+        GridDirection.Right,
+      ]),
+      createPiece('bridge', 2, 0, [
+        GridDirection.Left,
+        GridDirection.Right,
+      ]),
+      createPiece('leaf', 3, 0, [GridDirection.Left]),
+    ]);
+
+    expect(
+      canRemoveGalleryPieceWithoutDisconnectingNetwork(grid, 'bridge', {
+        position: { column: 1, row: -1 },
+        direction: GridDirection.Down,
+      }),
+    ).toBe(false);
+  });
+
+  it('rejects safe removal checks for unknown gallery pieces', () => {
+    const grid = createConstructionGrid({ columns: 4, rows: 3 });
+
+    expect(
+      canRemoveGalleryPieceWithoutDisconnectingNetwork(grid, 'missing-piece', {
+        position: { column: 1, row: -1 },
+        direction: GridDirection.Down,
+      }),
+    ).toBe(false);
   });
 
   it('detects adjacent positions', () => {
@@ -272,6 +547,17 @@ describe('construction grid', () => {
     expect(areGalleryPiecesConnected(room, corridor)).toBe(true);
   });
 
+  it('detects adjacent room and gallery pieces even when their directed edges differ', () => {
+    const room = createPiece('room', 1, 1, [GridDirection.Right], {
+      columns: 2,
+      rows: 2,
+    });
+    const corridor = createPiece('corridor', 2, 0, [GridDirection.Left]);
+
+    expect(areGalleryPiecesConnected(room, corridor)).toBe(false);
+    expect(areGalleryPiecesAdjacent(room, corridor)).toBe(true);
+  });
+
   it('validates a fully connected gallery network', () => {
     const grid = createConstructionGrid({ columns: 5, rows: 3 }, [
       createPiece('entrance', 0, 1, [GridDirection.Right]),
@@ -307,6 +593,18 @@ describe('construction grid', () => {
     ]);
 
     expect(isGalleryNetworkConnected(grid, 'entrance')).toBe(true);
+  });
+
+  it('returns the network connected to a specific gallery piece', () => {
+    const grid = createConstructionGrid({ columns: 5, rows: 3 }, [
+      createPiece('queen', 1, 1, [GridDirection.Right]),
+      createPiece('connected', 2, 1, [GridDirection.Left]),
+      createPiece('isolated', 4, 1, [GridDirection.Left]),
+    ]);
+
+    expect(getGalleryNetworkPieceIds(grid, 'queen')).toEqual(
+      new Set(['queen', 'connected']),
+    );
   });
 
   it('rejects gallery network validation from an unknown piece id', () => {
@@ -409,5 +707,23 @@ describe('construction grid', () => {
         direction: GridDirection.Right,
       }),
     ).toBe(false);
+  });
+
+  it('returns the gallery pieces connected to a conduit', () => {
+    const grid = createConstructionGrid({ columns: 5, rows: 3 }, [
+      createPiece('entrance', 1, 1, [GridDirection.Left, GridDirection.Right]),
+      createPiece('connected-room', 2, 1, [GridDirection.Left], {
+        columns: 2,
+        rows: 2,
+      }),
+      createPiece('isolated', 4, 0, [GridDirection.Left]),
+    ]);
+
+    expect(
+      getConduitConnectedPieceIds(grid, {
+        position: { column: 0, row: 1 },
+        direction: GridDirection.Right,
+      }),
+    ).toEqual(new Set(['entrance', 'connected-room']));
   });
 });
