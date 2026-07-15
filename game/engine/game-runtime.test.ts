@@ -128,6 +128,7 @@ describe('GameRuntime', () => {
         gold: 80,
         larvae: 0,
         roomCounts: {
+          barracksCount: 0,
           broodChamberCount: 0,
           fungusFarmCount: 0,
           queenChamberCount: 0,
@@ -148,6 +149,15 @@ describe('GameRuntime', () => {
         simulationTimeMs: 200,
         tickDurationMs: 100,
         totalTickCount: 2,
+      },
+      surfaceDefense: {
+        activeThreat: null,
+        availableSoldierCount: 0,
+        defeatedThreatCount: 0,
+        engagedSoldierCount: 0,
+        escapedThreatCount: 0,
+        survivalTimeMs: 200,
+        wave: 1,
       },
     });
   });

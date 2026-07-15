@@ -519,6 +519,7 @@ export const createMainScene = (
         this.floatingMenuSlideProgress,
         this.antAnimationTimeMs,
         this.gameRuntime?.getSnapshot().colony,
+        this.gameRuntime?.getSnapshot().surfaceDefense,
       );
     }
 

@@ -2,6 +2,7 @@ import type { RoomUpgradeRequirement } from './room-upgrades';
 import type { SimulationSystem, SimulationTickContext } from './simulation-engine';
 
 export interface ColonyRoomCounts {
+  readonly barracksCount: number;
   readonly broodChamberCount: number;
   readonly fungusFarmCount: number;
   readonly queenChamberCount: number;
@@ -57,6 +58,7 @@ const COLONY_EXPERIENCE_PER_LEVEL = 5;
 const PROGRESS_EPSILON = 1e-9;
 
 const EMPTY_ROOM_COUNTS: ColonyRoomCounts = {
+  barracksCount: 0,
   broodChamberCount: 0,
   fungusFarmCount: 0,
   queenChamberCount: 0,

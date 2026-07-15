@@ -29,6 +29,10 @@ import {
   getRoomUpgradeRequirement,
   isRoomUpgradeable,
 } from '@/game/simulation/room-upgrades';
+import type {
+  SurfaceDefenseSnapshot,
+  SurfaceThreatSnapshot,
+} from '@/game/simulation/surface-defense';
 import { getConstructionCost } from '@/game/simulation/construction-costs';
 
 import type PhaserType from 'phaser';
@@ -403,6 +407,7 @@ export class ConstructionGridRenderer {
     floatingMenuSlideProgress = isFloatingMenuCollapsed ? 1 : 0,
     antAnimationTimeMs = 0,
     colonySnapshot?: ColonyEconomySnapshot,
+    surfaceDefenseSnapshot?: SurfaceDefenseSnapshot,
   ): void {
     this.colonySnapshot = colonySnapshot;
     const gridArea = this.createGridArea(width, height, gridScrollY);
@@ -468,6 +473,7 @@ export class ConstructionGridRenderer {
     this.drawToolPreview(gridArea, pointer, toolMode, selectedPieceType);
     this.drawActionHintLabel(gridArea, pointer, toolMode, selectedPieceType);
     this.drawConduit(gridArea, constructionGridLayout.conduit);
+    this.drawSurfaceDefense(gridArea, surfaceDefenseSnapshot, antAnimationTimeMs);
     this.drawFloatingMenuToggle(
       viewportGridArea,
       pointer,
@@ -505,6 +511,7 @@ export class ConstructionGridRenderer {
 
   public getColonyRoomCounts(): ColonyRoomCounts {
     return {
+      barracksCount: this.countPiecesByDefinitionId('barracks'),
       broodChamberCount: this.countPiecesByDefinitionId('brood-chamber'),
       fungusFarmCount: this.countPiecesByDefinitionId('fungus-farm'),
       queenChamberCount: this.findQueenChamber() === undefined ? 0 : 1,
@@ -4206,6 +4213,158 @@ export class ConstructionGridRenderer {
       x: gridArea.x + (position.column + 0.5) * gridArea.cellSize,
       y: gridArea.y + (position.row + 0.5) * gridArea.cellSize,
     };
+  }
+
+  private drawSurfaceDefense(
+    gridArea: GridArea,
+    surfaceDefenseSnapshot: SurfaceDefenseSnapshot | undefined,
+    animationTimeMs: number,
+  ): void {
+    if (
+      surfaceDefenseSnapshot === undefined ||
+      surfaceDefenseSnapshot.activeThreat === null
+    ) {
+      return;
+    }
+
+    const threat = surfaceDefenseSnapshot.activeThreat;
+    const surfaceY = gridArea.y - gridArea.cellSize * 0.52;
+    const exitCenter = this.getCellCenter(
+      gridArea,
+      constructionGridLayout.conduit.position,
+    );
+    const leftEdge = gridArea.x + gridArea.cellSize * 0.75;
+    const rightEdge = gridArea.x + gridArea.width - gridArea.cellSize * 0.75;
+    const threatX =
+      threat.direction === 'left-to-right'
+        ? this.Phaser.Math.Linear(leftEdge, rightEdge, threat.progress)
+        : this.Phaser.Math.Linear(rightEdge, leftEdge, threat.progress);
+    const threatY =
+      surfaceY - gridArea.cellSize * 0.02 +
+      Math.sin(animationTimeMs * 0.003 + threat.progress * 12) *
+        gridArea.cellSize *
+        0.025;
+    const threatAngle =
+      threat.direction === 'left-to-right' ? 0 : Math.PI;
+
+    this.drawSurfaceThreat(gridArea, threatX, threatY, threatAngle, threat);
+    this.drawSurfaceSoldierResponse(
+      gridArea,
+      exitCenter.x,
+      surfaceY + gridArea.cellSize * 0.04,
+      threatX,
+      threatY + gridArea.cellSize * 0.02,
+      surfaceDefenseSnapshot.engagedSoldierCount,
+      animationTimeMs,
+    );
+  }
+
+  private drawSurfaceThreat(
+    gridArea: GridArea,
+    x: number,
+    y: number,
+    angle: number,
+    threat: SurfaceThreatSnapshot,
+  ): void {
+    const scale = 1 + Math.min(0.9, threat.wave * 0.12);
+    const bodyRadius = gridArea.cellSize * 0.11 * scale;
+    const shellRadius = bodyRadius * 1.35;
+    const spacing = bodyRadius * 1.8;
+    const directionX = Math.cos(angle);
+    const directionY = Math.sin(angle);
+    const abdomenX = x - directionX * spacing;
+    const abdomenY = y - directionY * spacing;
+    const headX = x + directionX * spacing * 0.78;
+    const headY = y + directionY * spacing * 0.78;
+
+    this.graphics.fillStyle(0x20140d, 0.95);
+    this.graphics.fillEllipse(abdomenX, abdomenY, shellRadius * 2, shellRadius * 1.5);
+    this.graphics.fillStyle(0x5f3c20, 0.96);
+    this.graphics.fillEllipse(x, y, bodyRadius * 2.8, bodyRadius * 1.95);
+    this.graphics.fillStyle(0x8e6438, 0.36);
+    this.graphics.fillEllipse(
+      x + directionX * bodyRadius * 0.25,
+      y - bodyRadius * 0.18,
+      bodyRadius * 1.65,
+      bodyRadius * 0.55,
+    );
+    this.graphics.fillStyle(0x170d08, 0.95);
+    this.graphics.fillCircle(headX, headY, bodyRadius * 0.68);
+
+    this.graphics.lineStyle(2, 0x140b07, 0.6);
+    for (let index = -1; index <= 1; index += 1) {
+      const legBaseY = y + index * bodyRadius * 0.34;
+
+      this.graphics.lineBetween(
+        x - bodyRadius * 0.4,
+        legBaseY,
+        x - bodyRadius * 1.15,
+        legBaseY + bodyRadius * 0.5,
+      );
+      this.graphics.lineBetween(
+        x + bodyRadius * 0.35,
+        legBaseY,
+        x + bodyRadius * 1.1,
+        legBaseY + bodyRadius * 0.45,
+      );
+    }
+
+    const hpWidth = gridArea.cellSize * 0.82;
+    const hpHeight = Math.max(3, gridArea.cellSize * 0.06);
+    const hpX = x - hpWidth / 2;
+    const hpY = y - gridArea.cellSize * 0.34;
+    const hpRatio = Math.max(0, threat.currentHitPoints / threat.maxHitPoints);
+
+    this.graphics.fillStyle(0x120d09, 0.92);
+    this.graphics.fillRoundedRect(hpX, hpY, hpWidth, hpHeight, hpHeight / 2);
+    this.graphics.fillStyle(0xd46a56, 0.92);
+    this.graphics.fillRoundedRect(
+      hpX,
+      hpY,
+      hpWidth * hpRatio,
+      hpHeight,
+      hpHeight / 2,
+    );
+  }
+
+  private drawSurfaceSoldierResponse(
+    gridArea: GridArea,
+    exitX: number,
+    exitY: number,
+    threatX: number,
+    threatY: number,
+    engagedSoldierCount: number,
+    animationTimeMs: number,
+  ): void {
+    const visibleSoldierCount = Math.min(4, engagedSoldierCount);
+
+    for (let index = 0; index < visibleSoldierCount; index += 1) {
+      const travel =
+        ((animationTimeMs * 0.0009 + index * 0.18) % 0.9) + 0.05;
+      const x = this.Phaser.Math.Linear(exitX, threatX, travel);
+      const y =
+        this.Phaser.Math.Linear(exitY, threatY, travel) +
+        (index % 2 === 0 ? -1 : 1) * gridArea.cellSize * 0.04;
+      const angle = Math.atan2(threatY - exitY, threatX - exitX);
+
+      this.drawSoldierAntSprite(gridArea, x, y, angle, 500 + index);
+    }
+  }
+
+  private drawSoldierAntSprite(
+    gridArea: GridArea,
+    x: number,
+    y: number,
+    angle: number,
+    antIndex: number,
+  ): void {
+    this.drawAntSprite(gridArea, x, y, angle, antIndex);
+    const glowDistance = Math.max(2, gridArea.cellSize * 0.08);
+    const glowX = x + Math.cos(angle) * glowDistance;
+    const glowY = y + Math.sin(angle) * glowDistance;
+
+    this.graphics.fillStyle(0xd46a56, 0.55);
+    this.graphics.fillCircle(glowX, glowY, Math.max(1.4, gridArea.cellSize * 0.03));
   }
 
   private drawConduitDirection(

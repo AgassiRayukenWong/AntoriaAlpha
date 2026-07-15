@@ -14,6 +14,10 @@ import {
 } from '@/game/simulation/game-clock';
 import { getRoomUpgradeRequirement } from '@/game/simulation/room-upgrades';
 import {
+  SurfaceDefenseSystem,
+  type SurfaceDefenseSnapshot,
+} from '@/game/simulation/surface-defense';
+import {
   SimulationEngine,
   type SimulationEngineStepResult,
 } from '@/game/simulation/simulation-engine';
@@ -23,6 +27,7 @@ export interface GameRuntimeSnapshot {
   readonly isPaused: boolean;
   readonly maximumDeltaTimeMs: number;
   readonly simulation: GameClockSnapshot;
+  readonly surfaceDefense: SurfaceDefenseSnapshot;
 }
 
 export type GameRuntimeSnapshotListener = (
@@ -37,12 +42,14 @@ export class GameRuntime {
   private readonly maximumDeltaTimeMs: number;
   private readonly simulationEngine: SimulationEngine;
   private readonly snapshotListeners = new Set<GameRuntimeSnapshotListener>();
+  private readonly surfaceDefenseSystem: SurfaceDefenseSystem;
 
   public constructor(options: GameRuntimeOptions = {}) {
     this.maximumDeltaTimeMs =
       options.maximumDeltaTimeMs ??
       DEFAULT_GAME_RUNTIME_CONFIG.maximumDeltaTimeMs;
     this.colonyEconomySystem = new ColonyEconomySystem();
+    this.surfaceDefenseSystem = new SurfaceDefenseSystem();
     this.simulationEngine = new SimulationEngine({
       clock: new GameClock({
         tickDurationMs:
@@ -84,6 +91,14 @@ export class GameRuntime {
         tickDurationMs,
         tickIndex,
       });
+      this.surfaceDefenseSystem.update(
+        {
+          simulationTimeMs: tickIndex * tickDurationMs,
+          tickDurationMs,
+          tickIndex,
+        },
+        this.colonyEconomySystem.getSnapshot(),
+      );
     }
 
     this.notifySnapshotListeners();
@@ -104,6 +119,7 @@ export class GameRuntime {
   public reset(): void {
     this.simulationEngine.reset();
     this.colonyEconomySystem.reset();
+    this.surfaceDefenseSystem.reset();
     this.notifySnapshotListeners();
   }
 
@@ -118,6 +134,9 @@ export class GameRuntime {
       isPaused: this.isPaused,
       maximumDeltaTimeMs: this.maximumDeltaTimeMs,
       simulation: this.simulationEngine.getSnapshot(),
+      surfaceDefense: this.surfaceDefenseSystem.getSnapshot(
+        this.colonyEconomySystem.getSnapshot(),
+      ),
     };
   }
 

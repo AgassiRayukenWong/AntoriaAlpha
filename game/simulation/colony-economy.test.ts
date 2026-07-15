@@ -22,6 +22,7 @@ describe('ColonyEconomySystem', () => {
 
     system.setInfrastructure(
       {
+        barracksCount: 0,
         broodChamberCount: 0,
         fungusFarmCount: 0,
         queenChamberCount: 1,
@@ -38,6 +39,7 @@ describe('ColonyEconomySystem', () => {
 
     system.setInfrastructure(
       {
+        barracksCount: 0,
         broodChamberCount: 0,
         fungusFarmCount: 2,
         queenChamberCount: 0,
@@ -60,6 +62,7 @@ describe('ColonyEconomySystem', () => {
 
     system.setInfrastructure(
       {
+        barracksCount: 0,
         broodChamberCount: 0,
         fungusFarmCount: 0,
         queenChamberCount: 1,
@@ -91,6 +94,7 @@ describe('ColonyEconomySystem', () => {
 
     system.setInfrastructure(
       {
+        barracksCount: 0,
         broodChamberCount: 1,
         fungusFarmCount: 0,
         queenChamberCount: 0,
