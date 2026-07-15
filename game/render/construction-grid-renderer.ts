@@ -310,6 +310,7 @@ export class ConstructionGridRenderer {
   private actionHintLabel?: PhaserType.GameObjects.Text;
   private constructionGrid: ConstructionGrid;
   private entranceCounterLabels: PhaserType.GameObjects.Text[] = [];
+  private hoveredInfoLabel?: PhaserType.GameObjects.Text;
   private floatingMenuRect?: FloatingMenuRect;
   private floatingMenuToggleArea?: FloatingMenuToggleArea;
   private networkStatusLabel?: PhaserType.GameObjects.Text;
@@ -372,6 +373,7 @@ export class ConstructionGridRenderer {
     );
     this.clearActionHintLabel();
     this.clearEntranceCounterLabels();
+    this.clearHoveredInfoLabel();
     this.clearNetworkStatusLabel();
     this.clearQueenStatusLabel();
     this.clearSelectedInfoLabel();
@@ -394,6 +396,7 @@ export class ConstructionGridRenderer {
       this.drawNetworkStatusLabel(viewportGridArea, floatingMenuOffsetX);
     }
     this.drawSelectedInfoLabel(gridArea, selectedPosition);
+    this.drawHoveredInfoLabel(gridArea, pointer);
     this.drawToolPreview(gridArea, pointer, toolMode, selectedPieceType);
     this.drawActionHintLabel(gridArea, pointer, toolMode, selectedPieceType);
     this.drawConduit(gridArea, constructionGridLayout.conduit);
@@ -1928,6 +1931,57 @@ export class ConstructionGridRenderer {
     this.selectedInfoLabel = label;
   }
 
+  private drawHoveredInfoLabel(
+    gridArea: GridArea,
+    pointer: ConstructionGridPointer | undefined,
+  ): void {
+    if (pointer === undefined || this.isPointInsideFloatingMenuPanel(pointer)) {
+      return;
+    }
+
+    const hoveredPosition = this.getGridPositionAtPoint(gridArea, pointer);
+
+    if (hoveredPosition === undefined) {
+      return;
+    }
+
+    const piece = this.findPieceAtPosition(hoveredPosition);
+
+    if (piece === undefined) {
+      return;
+    }
+
+    const label = this.gameObjects.text(
+      pointer.x + Math.max(14, gridArea.cellSize * 0.2),
+      pointer.y - Math.max(14, gridArea.cellSize * 0.2),
+      this.getPieceStatusLabel('Survol', piece),
+      {
+        backgroundColor: '#17130f',
+        color: constructionGridPalette.textWarning,
+        fontFamily: 'Arial, Helvetica, sans-serif',
+        fontSize: `${Math.max(11, Math.round(gridArea.cellSize * 0.17))}px`,
+        fontStyle: '700',
+        padding: {
+          x: Math.max(8, Math.round(gridArea.cellSize * 0.12)),
+          y: Math.max(5, Math.round(gridArea.cellSize * 0.08)),
+        },
+        resolution: constructionTextResolution,
+      },
+    );
+
+    label.setOrigin(0, 1);
+    label.setShadow(
+      1,
+      1,
+      constructionGridPalette.textShadow,
+      2,
+      true,
+      true,
+    );
+    label.setDepth(3);
+    this.hoveredInfoLabel = label;
+  }
+
   private drawNetworkStatusLabel(
     gridArea: GridArea,
     floatingMenuOffsetX: number,
@@ -1995,8 +2049,15 @@ export class ConstructionGridRenderer {
   }
 
   private getSelectedPieceLabel(piece: GalleryPiece): string {
+    return this.getPieceStatusLabel('S\u00e9lection', piece);
+  }
+
+  private getPieceStatusLabel(
+    prefix: 'Survol' | 'S\u00e9lection',
+    piece: GalleryPiece,
+  ): string {
     if (!this.isRoomPiece(piece)) {
-      return 'S\u00e9lection : Galerie';
+      return `${prefix} : Galerie`;
     }
 
     const definition = piece.definitionId
@@ -2005,7 +2066,7 @@ export class ConstructionGridRenderer {
     const pieceLabel = definition?.label ?? 'Pi\u00e8ce';
 
     if (piece.entranceLimit === undefined) {
-      return `S\u00e9lection : ${pieceLabel}`;
+      return `${prefix} : ${pieceLabel}`;
     }
 
     const entranceCount = countGalleryPieceEntrances(
@@ -2013,7 +2074,7 @@ export class ConstructionGridRenderer {
       piece,
     );
 
-    return `S\u00e9lection : ${pieceLabel} - ${entranceCount}/${piece.entranceLimit} entr\u00e9es`;
+    return `${prefix} : ${pieceLabel} - ${entranceCount}/${piece.entranceLimit} entr\u00e9es`;
   }
 
   private getGridPositionAtPoint(
@@ -2064,6 +2125,7 @@ export class ConstructionGridRenderer {
   public destroy(): void {
     this.clearActionHintLabel();
     this.clearEntranceCounterLabels();
+    this.clearHoveredInfoLabel();
     this.clearNetworkStatusLabel();
     this.clearQueenStatusLabel();
     this.clearSelectedInfoLabel();
@@ -2768,6 +2830,11 @@ export class ConstructionGridRenderer {
     this.actionHintLabel = undefined;
   }
 
+  private clearHoveredInfoLabel(): void {
+    this.hoveredInfoLabel?.destroy();
+    this.hoveredInfoLabel = undefined;
+  }
+
   private clearNetworkStatusLabel(): void {
     this.networkStatusLabel?.destroy();
     this.networkStatusLabel = undefined;
@@ -2786,6 +2853,18 @@ export class ConstructionGridRenderer {
   private clearSelectedInfoLabel(): void {
     this.selectedInfoLabel?.destroy();
     this.selectedInfoLabel = undefined;
+  }
+
+  private isPointInsideFloatingMenuPanel(
+    pointer: ConstructionGridPointer,
+  ): boolean {
+    return (
+      this.floatingMenuRect !== undefined &&
+      pointer.x >= this.floatingMenuRect.x &&
+      pointer.x <= this.floatingMenuRect.x + this.floatingMenuRect.width &&
+      pointer.y >= this.floatingMenuRect.y &&
+      pointer.y <= this.floatingMenuRect.y + this.floatingMenuRect.height
+    );
   }
 
   private eraseConnectedBorderSeams(
