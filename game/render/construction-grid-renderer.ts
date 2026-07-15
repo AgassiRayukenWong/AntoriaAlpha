@@ -16,7 +16,10 @@ import {
   type ConstructionGridConduit,
   type GalleryPiece,
 } from '@/game/simulation/construction-grid';
-import { createGalleryPieceFromDefinition } from '@/game/simulation/gallery-piece-catalog';
+import {
+  createGalleryPieceFromDefinition,
+  findGalleryPieceDefinition,
+} from '@/game/simulation/gallery-piece-catalog';
 
 import type PhaserType from 'phaser';
 
@@ -70,6 +73,11 @@ interface FloatingMenuRect {
   readonly y: number;
 }
 
+interface RoomVisualStyle {
+  readonly accentColor: number;
+  readonly fillColor: number;
+}
+
 export interface ConstructionGridPointer {
   readonly x: number;
   readonly y: number;
@@ -81,8 +89,11 @@ export enum ConstructionToolMode {
 }
 
 export enum ConstructionPieceType {
+  Barracks = 'barracks',
+  BroodChamber = 'brood-chamber',
+  FungusFarm = 'fungus-farm',
   Gallery = 'gallery',
-  Room = 'room',
+  Storage = 'storage',
 }
 
 const constructionGridPalette = {
@@ -141,10 +152,25 @@ const constructionPieceTypeLabels = {
     keyLabel: '1',
     nameLabel: 'Galerie',
   },
-  [ConstructionPieceType.Room]: {
+  [ConstructionPieceType.BroodChamber]: {
     costLabel: 'Co\u00fbt 4',
     keyLabel: '2',
-    nameLabel: 'Chambre',
+    nameLabel: 'Ponte',
+  },
+  [ConstructionPieceType.Barracks]: {
+    costLabel: 'Co\u00fbt 6',
+    keyLabel: '3',
+    nameLabel: 'Caserne',
+  },
+  [ConstructionPieceType.Storage]: {
+    costLabel: 'Co\u00fbt 5',
+    keyLabel: '4',
+    nameLabel: 'Entrep\u00f4t',
+  },
+  [ConstructionPieceType.FungusFarm]: {
+    costLabel: 'Co\u00fbt 5',
+    keyLabel: '5',
+    nameLabel: 'Champi',
   },
 } as const satisfies Record<
   ConstructionPieceType,
@@ -154,6 +180,45 @@ const constructionPieceTypeLabels = {
     readonly nameLabel: string;
   }
 >;
+
+const constructionPieceTypes = [
+  ConstructionPieceType.Gallery,
+  ConstructionPieceType.BroodChamber,
+  ConstructionPieceType.Barracks,
+  ConstructionPieceType.Storage,
+  ConstructionPieceType.FungusFarm,
+] as const satisfies readonly ConstructionPieceType[];
+
+const constructionPieceDefinitionIds = {
+  [ConstructionPieceType.Barracks]: 'barracks',
+  [ConstructionPieceType.BroodChamber]: 'brood-chamber',
+  [ConstructionPieceType.FungusFarm]: 'fungus-farm',
+  [ConstructionPieceType.Gallery]: undefined,
+  [ConstructionPieceType.Storage]: 'storage',
+} as const satisfies Record<ConstructionPieceType, string | undefined>;
+
+const roomVisualStyles: Readonly<Record<string, RoomVisualStyle>> = {
+  barracks: {
+    accentColor: 0xd46a56,
+    fillColor: 0x5a2f24,
+  },
+  'brood-chamber': {
+    accentColor: 0xf0c76a,
+    fillColor: 0x5c3a22,
+  },
+  'fungus-farm': {
+    accentColor: 0xa9c779,
+    fillColor: 0x344b2c,
+  },
+  'queen-chamber': {
+    accentColor: 0xf0c76a,
+    fillColor: 0x50341f,
+  },
+  storage: {
+    accentColor: 0xb2874c,
+    fillColor: 0x4d3b24,
+  },
+} as const;
 
 const queenChamberPieceId = 'sample-queen-chamber';
 
@@ -196,8 +261,8 @@ const constructionGridLayout = {
       position: { column: 13, row: 3 },
     }),
     createGalleryPieceFromDefinition({
-      definitionId: 'small-room',
-      pieceId: 'sample-gallery-6',
+      definitionId: 'brood-chamber',
+      pieceId: 'sample-brood-chamber',
       position: { column: 14, row: 2 },
     }),
     createGalleryPieceFromDefinition({
@@ -505,10 +570,12 @@ export class ConstructionGridRenderer {
     position: ConstructionGridPosition,
     pieceType: ConstructionPieceType,
   ): GalleryPiece {
-    if (pieceType === ConstructionPieceType.Room) {
+    const definitionId = constructionPieceDefinitionIds[pieceType];
+
+    if (definitionId !== undefined) {
       return createGalleryPieceFromDefinition({
-        definitionId: 'small-room',
-        pieceId: `placed-gallery-${this.placedGalleryIndex}`,
+        definitionId,
+        pieceId: `placed-${pieceType}-${this.placedGalleryIndex}`,
         position,
       });
     }
@@ -1041,7 +1108,11 @@ export class ConstructionGridRenderer {
     const titleY = toolY + toolButtonHeight + rowGap * 2.1;
     const pieceFirstY = titleY + rowGap * 0.65;
     const height =
-      pieceFirstY + pieceButtonHeight * 2 + rowGap - y + padding;
+      pieceFirstY +
+      pieceButtonHeight * constructionPieceTypes.length +
+      rowGap * (constructionPieceTypes.length - 1) -
+      y +
+      padding;
     const width = pieceButtonWidth + padding * 2;
 
     return {
@@ -1348,22 +1419,13 @@ export class ConstructionGridRenderer {
     const x = layout.contentX;
     const y = layout.pieceFirstY;
 
-    return [
-      {
-        height: buttonHeight,
-        pieceType: ConstructionPieceType.Gallery,
-        width: buttonWidth,
-        x,
-        y,
-      },
-      {
-        height: buttonHeight,
-        pieceType: ConstructionPieceType.Room,
-        width: buttonWidth,
-        x,
-        y: y + buttonHeight + gap,
-      },
-    ];
+    return constructionPieceTypes.map((pieceType, index) => ({
+      height: buttonHeight,
+      pieceType,
+      width: buttonWidth,
+      x,
+      y: y + index * (buttonHeight + gap),
+    }));
   }
 
   private drawConstructionPiecePanel(
@@ -1518,8 +1580,10 @@ export class ConstructionGridRenderer {
       ).length;
     }
 
+    const definitionId = constructionPieceDefinitionIds[pieceType];
+
     return this.constructionGrid.pieces.filter(
-      (piece) => this.isRoomPiece(piece) && piece.id !== queenChamberPieceId,
+      (piece) => piece.definitionId === definitionId,
     ).length;
   }
 
@@ -1935,8 +1999,13 @@ export class ConstructionGridRenderer {
       return 'S\u00e9lection : Galerie';
     }
 
+    const definition = piece.definitionId
+      ? findGalleryPieceDefinition(piece.definitionId)
+      : undefined;
+    const pieceLabel = definition?.label ?? 'Pi\u00e8ce';
+
     if (piece.entranceLimit === undefined) {
-      return 'S\u00e9lection : Chambre';
+      return `S\u00e9lection : ${pieceLabel}`;
     }
 
     const entranceCount = countGalleryPieceEntrances(
@@ -1944,7 +2013,7 @@ export class ConstructionGridRenderer {
       piece,
     );
 
-    return `S\u00e9lection : Chambre - ${entranceCount}/${piece.entranceLimit} entr\u00e9es`;
+    return `S\u00e9lection : ${pieceLabel} - ${entranceCount}/${piece.entranceLimit} entr\u00e9es`;
   }
 
   private getGridPositionAtPoint(
@@ -2011,8 +2080,9 @@ export class ConstructionGridRenderer {
 
     roomPieces.forEach((piece) => {
       const rect = this.getGalleryRect(gridArea, piece);
+      const visualStyle = this.getRoomVisualStyle(piece);
 
-      this.graphics.fillStyle(constructionGridPalette.roomFill, 0.9);
+      this.graphics.fillStyle(visualStyle.fillColor, 0.9);
       this.graphics.fillRoundedRect(
         rect.x + padding,
         rect.y + padding,
@@ -2034,7 +2104,156 @@ export class ConstructionGridRenderer {
         rect.width * 0.6,
         rect.height * 0.22,
       );
+      this.drawRoomTypeMarker(gridArea, piece, rect, visualStyle);
     });
+  }
+
+  private getRoomVisualStyle(piece: GalleryPiece): RoomVisualStyle {
+    if (piece.definitionId !== undefined && piece.definitionId in roomVisualStyles) {
+      return roomVisualStyles[piece.definitionId];
+    }
+
+    return {
+      accentColor: constructionGridPalette.roomHighlight,
+      fillColor: constructionGridPalette.roomFill,
+    };
+  }
+
+  private drawRoomTypeMarker(
+    gridArea: GridArea,
+    piece: GalleryPiece,
+    rect: GalleryRect,
+    visualStyle: RoomVisualStyle,
+  ): void {
+    if (piece.definitionId === 'brood-chamber') {
+      this.drawBroodChamberMarker(gridArea, rect, visualStyle);
+      return;
+    }
+
+    if (piece.definitionId === 'barracks') {
+      this.drawBarracksMarker(gridArea, rect, visualStyle);
+      return;
+    }
+
+    if (piece.definitionId === 'storage') {
+      this.drawStorageMarker(gridArea, rect, visualStyle);
+      return;
+    }
+
+    if (piece.definitionId === 'fungus-farm') {
+      this.drawFungusFarmMarker(gridArea, rect, visualStyle);
+    }
+  }
+
+  private drawBroodChamberMarker(
+    gridArea: GridArea,
+    rect: GalleryRect,
+    visualStyle: RoomVisualStyle,
+  ): void {
+    const eggWidth = gridArea.cellSize * 0.18;
+    const eggHeight = gridArea.cellSize * 0.26;
+    const centerY = rect.y + rect.height * 0.5;
+    const centerX = rect.x + rect.width * 0.5;
+
+    this.graphics.fillStyle(0xf4dfb0, 0.88);
+    [-0.22, 0, 0.22].forEach((offset) => {
+      this.graphics.fillEllipse(
+        centerX + rect.width * offset,
+        centerY + Math.abs(offset) * gridArea.cellSize * 0.18,
+        eggWidth,
+        eggHeight,
+      );
+    });
+    this.graphics.lineStyle(1, visualStyle.accentColor, 0.42);
+    this.graphics.strokeEllipse(centerX, centerY, rect.width * 0.52, rect.height * 0.26);
+  }
+
+  private drawBarracksMarker(
+    gridArea: GridArea,
+    rect: GalleryRect,
+    visualStyle: RoomVisualStyle,
+  ): void {
+    const centerX = rect.x + rect.width / 2;
+    const centerY = rect.y + rect.height / 2;
+    const length = gridArea.cellSize * 0.58;
+    const guard = gridArea.cellSize * 0.1;
+
+    this.graphics.lineStyle(4, visualStyle.accentColor, 0.72);
+    this.graphics.lineBetween(
+      centerX - length / 2,
+      centerY + length / 2,
+      centerX + length / 2,
+      centerY - length / 2,
+    );
+    this.graphics.lineBetween(
+      centerX - length / 2,
+      centerY - length / 2,
+      centerX + length / 2,
+      centerY + length / 2,
+    );
+    this.graphics.lineStyle(2, 0x24160d, 0.8);
+    this.graphics.lineBetween(centerX - guard, centerY, centerX + guard, centerY);
+  }
+
+  private drawStorageMarker(
+    gridArea: GridArea,
+    rect: GalleryRect,
+    visualStyle: RoomVisualStyle,
+  ): void {
+    const boxSize = gridArea.cellSize * 0.3;
+    const gap = gridArea.cellSize * 0.06;
+    const startX = rect.x + rect.width / 2 - boxSize - gap / 2;
+    const startY = rect.y + rect.height / 2 - boxSize / 2;
+    const cornerRadius = gridArea.cellSize * 0.04;
+
+    this.graphics.fillStyle(visualStyle.accentColor, 0.36);
+    this.graphics.lineStyle(2, visualStyle.accentColor, 0.62);
+    [0, 1].forEach((index) => {
+      const x = startX + index * (boxSize + gap);
+
+      this.graphics.fillRoundedRect(x, startY, boxSize, boxSize, cornerRadius);
+      this.graphics.strokeRoundedRect(x, startY, boxSize, boxSize, cornerRadius);
+      this.graphics.lineBetween(x, startY + boxSize * 0.36, x + boxSize, startY + boxSize * 0.36);
+    });
+  }
+
+  private drawFungusFarmMarker(
+    gridArea: GridArea,
+    rect: GalleryRect,
+    visualStyle: RoomVisualStyle,
+  ): void {
+    const stemWidth = gridArea.cellSize * 0.09;
+    const stemHeight = gridArea.cellSize * 0.25;
+    const capWidth = gridArea.cellSize * 0.34;
+    const capHeight = gridArea.cellSize * 0.18;
+    const centerX = rect.x + rect.width / 2;
+    const baseY = rect.y + rect.height * 0.62;
+
+    this.graphics.fillStyle(0xe5dcc2, 0.76);
+    this.graphics.fillRoundedRect(
+      centerX - stemWidth / 2,
+      baseY - stemHeight,
+      stemWidth,
+      stemHeight,
+      stemWidth / 2,
+    );
+    this.graphics.fillStyle(visualStyle.accentColor, 0.78);
+    this.graphics.fillEllipse(
+      centerX,
+      baseY - stemHeight,
+      capWidth,
+      capHeight,
+    );
+    this.graphics.fillCircle(
+      centerX - capWidth * 0.18,
+      baseY - stemHeight - capHeight * 0.05,
+      gridArea.cellSize * 0.025,
+    );
+    this.graphics.fillCircle(
+      centerX + capWidth * 0.16,
+      baseY - stemHeight + capHeight * 0.08,
+      gridArea.cellSize * 0.022,
+    );
   }
 
   private drawQueenAnchor(gridArea: GridArea): void {

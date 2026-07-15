@@ -254,7 +254,22 @@ export const createMainScene = (
       }
 
       if (event.code === 'Digit2' || event.code === 'Numpad2') {
-        this.setSelectedPieceType(ConstructionPieceType.Room);
+        this.setSelectedPieceType(ConstructionPieceType.BroodChamber);
+        return;
+      }
+
+      if (event.code === 'Digit3' || event.code === 'Numpad3') {
+        this.setSelectedPieceType(ConstructionPieceType.Barracks);
+        return;
+      }
+
+      if (event.code === 'Digit4' || event.code === 'Numpad4') {
+        this.setSelectedPieceType(ConstructionPieceType.Storage);
+        return;
+      }
+
+      if (event.code === 'Digit5' || event.code === 'Numpad5') {
+        this.setSelectedPieceType(ConstructionPieceType.FungusFarm);
         return;
       }
 

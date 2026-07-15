@@ -5,10 +5,13 @@ import {
 } from './construction-grid';
 
 export enum GalleryPieceKind {
+  Barracks = 'barracks',
+  BroodChamber = 'brood-chamber',
   Cross = 'cross',
+  FungusFarm = 'fungus-farm',
   QueenChamber = 'queen-chamber',
-  Room = 'room',
   Straight = 'straight',
+  Storage = 'storage',
   Tee = 'tee',
   Turn = 'turn',
 }
@@ -137,7 +140,7 @@ export const galleryPieceCatalog = [
   {
     id: 'queen-chamber',
     kind: GalleryPieceKind.QueenChamber,
-    label: 'Chambre de reine',
+    label: 'Chambre royale',
     width: 2,
     height: 2,
     entranceLimit: 4,
@@ -149,12 +152,54 @@ export const galleryPieceCatalog = [
     ],
   },
   {
-    id: 'small-room',
-    kind: GalleryPieceKind.Room,
-    label: 'Petite salle',
+    id: 'brood-chamber',
+    kind: GalleryPieceKind.BroodChamber,
+    label: 'Chambre de ponte',
     width: 2,
     height: 2,
     entranceLimit: 4,
+    connections: [
+      GridDirection.Up,
+      GridDirection.Right,
+      GridDirection.Down,
+      GridDirection.Left,
+    ],
+  },
+  {
+    id: 'barracks',
+    kind: GalleryPieceKind.Barracks,
+    label: 'Caserne',
+    width: 2,
+    height: 2,
+    entranceLimit: 3,
+    connections: [
+      GridDirection.Up,
+      GridDirection.Right,
+      GridDirection.Down,
+      GridDirection.Left,
+    ],
+  },
+  {
+    id: 'storage',
+    kind: GalleryPieceKind.Storage,
+    label: 'Entrep\u00f4t',
+    width: 2,
+    height: 2,
+    entranceLimit: 3,
+    connections: [
+      GridDirection.Up,
+      GridDirection.Right,
+      GridDirection.Down,
+      GridDirection.Left,
+    ],
+  },
+  {
+    id: 'fungus-farm',
+    kind: GalleryPieceKind.FungusFarm,
+    label: 'Champignonni\u00e8re',
+    width: 2,
+    height: 2,
+    entranceLimit: 2,
     connections: [
       GridDirection.Up,
       GridDirection.Right,
@@ -182,6 +227,7 @@ export const createGalleryPieceFromDefinition = (
   }
 
   return {
+    definitionId: options.definitionId,
     id: options.pieceId,
     position: options.position,
     size: {

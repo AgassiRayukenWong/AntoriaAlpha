@@ -17,6 +17,7 @@ export interface ConstructionGridPosition {
 
 export interface GalleryPiece {
   readonly connections: readonly GridDirection[];
+  readonly definitionId?: string;
   readonly entranceLimit?: number;
   readonly id: string;
   readonly position: ConstructionGridPosition;

@@ -12,10 +12,13 @@ describe('galleryPieceCatalog', () => {
   it('contains the expected construction piece kinds', () => {
     expect(new Set(galleryPieceCatalog.map((piece) => piece.kind))).toEqual(
       new Set([
+        GalleryPieceKind.Barracks,
+        GalleryPieceKind.BroodChamber,
         GalleryPieceKind.Cross,
+        GalleryPieceKind.FungusFarm,
         GalleryPieceKind.QueenChamber,
-        GalleryPieceKind.Room,
         GalleryPieceKind.Straight,
+        GalleryPieceKind.Storage,
         GalleryPieceKind.Tee,
         GalleryPieceKind.Turn,
       ]),
@@ -86,6 +89,7 @@ describe('galleryPieceCatalog', () => {
         position: { column: 3, row: 4 },
       }),
     ).toEqual({
+      definitionId: 'turn-right-down',
       id: 'piece-1',
       entranceLimit: 2,
       position: { column: 3, row: 4 },
@@ -97,7 +101,7 @@ describe('galleryPieceCatalog', () => {
   it('copies multi-cell definition size into placed pieces', () => {
     expect(
       createGalleryPieceFromDefinition({
-        definitionId: 'small-room',
+        definitionId: 'brood-chamber',
         pieceId: 'room-1',
         position: { column: 2, row: 2 },
       }),
