@@ -1,3 +1,4 @@
+import type { ColonyRoomCounts } from '@/game/simulation/colony-economy';
 import {
   areGalleryPiecesAdjacent,
   areGalleryPiecesConnected,
@@ -99,6 +100,9 @@ export enum ConstructionPieceType {
 const constructionGridPalette = {
   antBody: 0x1f140d,
   antHighlight: 0x8f6a3d,
+  egg: 0xf1dfb4,
+  fungusGlow: 0x93b85d,
+  storageCrate: 0xc49a57,
   base: 0x100f0b,
   conduitBorder: 0x8f7a55,
   conduitFill: 0x242017,
@@ -228,7 +232,7 @@ const constructionGridLayout = {
   columns: 16,
   conduit: {
     direction: GridDirection.Down,
-    position: { column: 12, row: -1 },
+    position: { column: 8, row: -1 },
   },
   depthBandCount: 5,
   gridAlpha: 0.3,
@@ -240,52 +244,87 @@ const constructionGridLayout = {
     createGalleryPieceFromDefinition({
       definitionId: 'straight-vertical',
       pieceId: 'sample-gallery-1',
-      position: { column: 12, row: 0 },
+      position: { column: 8, row: 0 },
     }),
     createGalleryPieceFromDefinition({
       definitionId: 'straight-vertical',
       pieceId: 'sample-gallery-2',
-      position: { column: 12, row: 1 },
+      position: { column: 8, row: 1 },
     }),
     createGalleryPieceFromDefinition({
       definitionId: 'straight-vertical',
       pieceId: 'sample-gallery-3',
-      position: { column: 12, row: 2 },
+      position: { column: 8, row: 2 },
     }),
     createGalleryPieceFromDefinition({
       definitionId: 'cross',
       pieceId: 'sample-gallery-4',
-      position: { column: 12, row: 3 },
+      position: { column: 8, row: 3 },
     }),
     createGalleryPieceFromDefinition({
       definitionId: 'straight-horizontal',
       pieceId: 'sample-gallery-5',
-      position: { column: 13, row: 3 },
+      position: { column: 7, row: 3 },
     }),
     createGalleryPieceFromDefinition({
       definitionId: 'brood-chamber',
       pieceId: 'sample-brood-chamber',
-      position: { column: 14, row: 2 },
-    }),
-    createGalleryPieceFromDefinition({
-      definitionId: 'straight-horizontal',
-      pieceId: 'sample-gallery-7',
-      position: { column: 11, row: 3 },
+      position: { column: 9, row: 2 },
     }),
     createGalleryPieceFromDefinition({
       definitionId: 'queen-chamber',
       pieceId: queenChamberPieceId,
-      position: { column: 9, row: 2 },
+      position: { column: 5, row: 2 },
+    }),
+    createGalleryPieceFromDefinition({
+      definitionId: 'straight-vertical',
+      pieceId: 'sample-gallery-7',
+      position: { column: 8, row: 4 },
+    }),
+    createGalleryPieceFromDefinition({
+      definitionId: 'cross',
+      pieceId: 'sample-gallery-8',
+      position: { column: 8, row: 5 },
     }),
     createGalleryPieceFromDefinition({
       definitionId: 'straight-vertical',
       pieceId: 'sample-gallery-9',
-      position: { column: 12, row: 4 },
+      position: { column: 8, row: 6 },
     }),
     createGalleryPieceFromDefinition({
       definitionId: 'straight-vertical',
       pieceId: 'sample-gallery-10',
-      position: { column: 12, row: 5 },
+      position: { column: 8, row: 7 },
+    }),
+    createGalleryPieceFromDefinition({
+      definitionId: 'straight-horizontal',
+      pieceId: 'sample-gallery-11',
+      position: { column: 7, row: 5 },
+    }),
+    createGalleryPieceFromDefinition({
+      definitionId: 'straight-horizontal',
+      pieceId: 'sample-gallery-12',
+      position: { column: 6, row: 5 },
+    }),
+    createGalleryPieceFromDefinition({
+      definitionId: 'storage',
+      pieceId: 'sample-storage',
+      position: { column: 4, row: 5 },
+    }),
+    createGalleryPieceFromDefinition({
+      definitionId: 'straight-horizontal',
+      pieceId: 'sample-gallery-13',
+      position: { column: 9, row: 5 },
+    }),
+    createGalleryPieceFromDefinition({
+      definitionId: 'fungus-farm',
+      pieceId: 'sample-fungus-farm',
+      position: { column: 10, row: 5 },
+    }),
+    createGalleryPieceFromDefinition({
+      definitionId: 'barracks',
+      pieceId: 'sample-barracks',
+      position: { column: 7, row: 8 },
     }),
   ],
   soilLineCount: 18,
@@ -390,6 +429,7 @@ export class ConstructionGridRenderer {
     this.drawSelectedGridCell(gridArea, selectedPosition, selectedPieceType);
     this.drawGalleryPieces(gridArea, this.constructionGrid.pieces);
     this.drawQueenAnchor(gridArea);
+    this.drawRoomActivity(gridArea, antAnimationTimeMs);
     this.drawAntTraffic(gridArea, antAnimationTimeMs);
     this.drawSelectedPiece(gridArea, selectedPosition);
     if (floatingMenuSlideProgress < 1) {
@@ -433,6 +473,15 @@ export class ConstructionGridRenderer {
       height - gridArea.y - height * constructionGridLayout.verticalPaddingRatio;
 
     return Math.max(0, gridArea.height - viewportHeight);
+  }
+
+  public getColonyRoomCounts(): ColonyRoomCounts {
+    return {
+      broodChamberCount: this.countPiecesByDefinitionId('brood-chamber'),
+      fungusFarmCount: this.countPiecesByDefinitionId('fungus-farm'),
+      queenChamberCount: this.findQueenChamber() === undefined ? 0 : 1,
+      storageCount: this.countPiecesByDefinitionId('storage'),
+    };
   }
 
   public getToolModeAtPointer(
@@ -2155,6 +2204,309 @@ export class ConstructionGridRenderer {
     }
   }
 
+  private drawRoomActivity(gridArea: GridArea, animationTimeMs: number): void {
+    const queenChamber = this.findQueenChamber();
+
+    if (queenChamber !== undefined) {
+      this.drawQueenEggLayingActivity(gridArea, queenChamber, animationTimeMs);
+    }
+
+    const broodChamber = this.findPieceByDefinitionId('brood-chamber');
+
+    if (broodChamber !== undefined) {
+      this.drawBroodChamberActivity(gridArea, broodChamber, animationTimeMs);
+    }
+
+    const barracks = this.findPieceByDefinitionId('barracks');
+
+    if (barracks !== undefined) {
+      this.drawBarracksActivity(gridArea, barracks, animationTimeMs);
+    }
+
+    const storage = this.findPieceByDefinitionId('storage');
+
+    if (storage !== undefined) {
+      this.drawStorageActivity(gridArea, storage, animationTimeMs);
+    }
+
+    const fungusFarm = this.findPieceByDefinitionId('fungus-farm');
+
+    if (fungusFarm !== undefined) {
+      this.drawFungusFarmActivity(gridArea, fungusFarm, animationTimeMs);
+    }
+
+    if (queenChamber !== undefined && broodChamber !== undefined) {
+      this.drawCarrierRouteActivity(
+        gridArea,
+        queenChamber.id,
+        broodChamber.id,
+        animationTimeMs,
+        constructionGridPalette.egg,
+        0,
+      );
+    }
+
+    if (fungusFarm !== undefined && storage !== undefined) {
+      this.drawCarrierRouteActivity(
+        gridArea,
+        fungusFarm.id,
+        storage.id,
+        animationTimeMs,
+        constructionGridPalette.fungusGlow,
+        1400,
+      );
+    }
+  }
+
+  private drawQueenEggLayingActivity(
+    gridArea: GridArea,
+    queenChamber: GalleryPiece,
+    animationTimeMs: number,
+  ): void {
+    const rect = this.getGalleryRect(gridArea, queenChamber);
+    const pulse = (Math.sin(animationTimeMs * 0.004) + 1) / 2;
+    const eggBaseX = rect.x + rect.width * 0.34;
+    const eggBaseY = rect.y + rect.height * 0.68;
+    const eggSpacing = gridArea.cellSize * 0.16;
+
+    this.graphics.fillStyle(constructionGridPalette.egg, 0.74 + pulse * 0.18);
+
+    for (let index = 0; index < 4; index += 1) {
+      const offsetX = (index % 2) * eggSpacing;
+      const offsetY = Math.floor(index / 2) * eggSpacing * 0.9;
+
+      this.graphics.fillEllipse(
+        eggBaseX + offsetX,
+        eggBaseY + offsetY,
+        gridArea.cellSize * 0.12,
+        gridArea.cellSize * 0.17,
+      );
+    }
+
+    const queenWorkerX = rect.x + rect.width * 0.7 + Math.sin(animationTimeMs * 0.0032) * gridArea.cellSize * 0.12;
+    const queenWorkerY = rect.y + rect.height * 0.66;
+    this.drawAntSprite(gridArea, queenWorkerX, queenWorkerY, Math.PI, 101);
+  }
+
+  private drawBroodChamberActivity(
+    gridArea: GridArea,
+    broodChamber: GalleryPiece,
+    animationTimeMs: number,
+  ): void {
+    const rect = this.getGalleryRect(gridArea, broodChamber);
+    const centerX = rect.x + rect.width / 2;
+    const centerY = rect.y + rect.height * 0.56;
+    const glowWidth = rect.width * 0.48;
+    const glowHeight = rect.height * 0.22;
+
+    this.graphics.fillStyle(constructionGridPalette.egg, 0.12);
+    this.graphics.fillEllipse(centerX, centerY, glowWidth, glowHeight);
+
+    for (let index = 0; index < 3; index += 1) {
+      const phase = animationTimeMs * 0.004 + index * 1.8;
+      this.graphics.fillStyle(constructionGridPalette.egg, 0.76);
+      this.graphics.fillEllipse(
+        centerX - gridArea.cellSize * 0.18 + index * gridArea.cellSize * 0.18,
+        centerY + Math.sin(phase) * gridArea.cellSize * 0.03,
+        gridArea.cellSize * 0.11,
+        gridArea.cellSize * 0.15,
+      );
+    }
+
+    this.drawAntSprite(
+      gridArea,
+      centerX + Math.sin(animationTimeMs * 0.003) * gridArea.cellSize * 0.22,
+      rect.y + rect.height * 0.34,
+      0,
+      111,
+    );
+  }
+
+  private drawBarracksActivity(
+    gridArea: GridArea,
+    barracks: GalleryPiece,
+    animationTimeMs: number,
+  ): void {
+    const rect = this.getGalleryRect(gridArea, barracks);
+    const leftX = rect.x + rect.width * 0.36;
+    const rightX = rect.x + rect.width * 0.64;
+    const centerY = rect.y + rect.height * 0.62;
+    const sparY = rect.y + rect.height * 0.34;
+    const march = Math.sin(animationTimeMs * 0.006) * gridArea.cellSize * 0.08;
+
+    this.drawAntSprite(gridArea, leftX, centerY + march, 0.2, 121);
+    this.drawAntSprite(gridArea, rightX, centerY - march, Math.PI - 0.2, 122);
+
+    this.graphics.lineStyle(2, roomVisualStyles.barracks.accentColor, 0.48);
+    this.graphics.lineBetween(
+      rect.x + rect.width * 0.42,
+      sparY,
+      rect.x + rect.width * 0.58,
+      sparY + Math.sin(animationTimeMs * 0.01) * gridArea.cellSize * 0.06,
+    );
+  }
+
+  private drawStorageActivity(
+    gridArea: GridArea,
+    storage: GalleryPiece,
+    animationTimeMs: number,
+  ): void {
+    const rect = this.getGalleryRect(gridArea, storage);
+    const laneY = rect.y + rect.height * 0.62;
+    const travel = (Math.sin(animationTimeMs * 0.0042) + 1) / 2;
+    const antX = this.Phaser.Math.Linear(
+      rect.x + rect.width * 0.3,
+      rect.x + rect.width * 0.7,
+      travel,
+    );
+
+    this.drawAntSprite(gridArea, antX, laneY, 0, 131);
+    this.graphics.fillStyle(constructionGridPalette.storageCrate, 0.9);
+    this.graphics.fillRoundedRect(
+      antX + gridArea.cellSize * 0.05,
+      laneY - gridArea.cellSize * 0.08,
+      gridArea.cellSize * 0.09,
+      gridArea.cellSize * 0.09,
+      gridArea.cellSize * 0.015,
+    );
+    this.graphics.fillRoundedRect(
+      rect.x + rect.width * 0.32,
+      rect.y + rect.height * 0.34,
+      gridArea.cellSize * 0.12,
+      gridArea.cellSize * 0.12,
+      gridArea.cellSize * 0.02,
+    );
+    this.graphics.fillRoundedRect(
+      rect.x + rect.width * 0.56,
+      rect.y + rect.height * 0.33,
+      gridArea.cellSize * 0.1,
+      gridArea.cellSize * 0.1,
+      gridArea.cellSize * 0.02,
+    );
+  }
+
+  private drawFungusFarmActivity(
+    gridArea: GridArea,
+    fungusFarm: GalleryPiece,
+    animationTimeMs: number,
+  ): void {
+    const rect = this.getGalleryRect(gridArea, fungusFarm);
+    const centerX = rect.x + rect.width / 2;
+    const centerY = rect.y + rect.height * 0.58;
+
+    this.graphics.fillStyle(constructionGridPalette.fungusGlow, 0.14);
+    this.graphics.fillEllipse(
+      centerX,
+      centerY,
+      rect.width * 0.5,
+      rect.height * 0.24,
+    );
+
+    for (let index = 0; index < 3; index += 1) {
+      const offsetX = (index - 1) * gridArea.cellSize * 0.16;
+      const bob = Math.sin(animationTimeMs * 0.0048 + index * 1.7) * gridArea.cellSize * 0.04;
+
+      this.graphics.fillStyle(constructionGridPalette.fungusGlow, 0.82);
+      this.graphics.fillEllipse(
+        centerX + offsetX,
+        centerY + bob,
+        gridArea.cellSize * 0.16,
+        gridArea.cellSize * 0.12,
+      );
+    }
+
+    this.drawAntSprite(
+      gridArea,
+      centerX + Math.cos(animationTimeMs * 0.0038) * gridArea.cellSize * 0.18,
+      rect.y + rect.height * 0.38,
+      Math.PI * 0.1,
+      141,
+    );
+  }
+
+  private drawCarrierRouteActivity(
+    gridArea: GridArea,
+    startPieceId: string,
+    targetPieceId: string,
+    animationTimeMs: number,
+    cargoColor: number,
+    timeOffsetMs: number,
+  ): void {
+    const route = this.getPieceToPieceRoute(gridArea, startPieceId, targetPieceId);
+
+    if (route.length < 2) {
+      return;
+    }
+
+    const totalLength = this.getRouteLength(route);
+
+    if (totalLength <= 0) {
+      return;
+    }
+
+    const distance =
+      ((animationTimeMs + timeOffsetMs) * gridArea.cellSize * 0.0011) %
+      totalLength;
+    const position = this.getPointAlongRoute(route, distance);
+
+    if (position === undefined) {
+      return;
+    }
+
+    this.drawCarrierAntSprite(
+      gridArea,
+      position.x,
+      position.y,
+      position.angle,
+      cargoColor,
+      201 + timeOffsetMs,
+    );
+  }
+
+  private getPieceToPieceRoute(
+    gridArea: GridArea,
+    startPieceId: string,
+    targetPieceId: string,
+  ): readonly { readonly x: number; readonly y: number }[] {
+    const connectedPieceIds = this.getQueenNetworkPieceIds();
+    const connectedPieces = this.constructionGrid.pieces.filter((piece) =>
+      connectedPieceIds.has(piece.id),
+    );
+    const piecePath = this.findShortestPiecePath(
+      connectedPieces,
+      startPieceId,
+      targetPieceId,
+    );
+
+    if (piecePath.length < 2) {
+      return [];
+    }
+
+    return piecePath
+      .map((pieceId) => connectedPieces.find((piece) => piece.id === pieceId))
+      .filter((piece): piece is GalleryPiece => piece !== undefined)
+      .map((piece) => {
+        const rect = this.getGalleryRect(gridArea, piece);
+
+        return {
+          x: rect.x + rect.width / 2,
+          y: rect.y + rect.height / 2,
+        };
+      });
+  }
+
+  private findPieceByDefinitionId(definitionId: string): GalleryPiece | undefined {
+    return this.constructionGrid.pieces.find(
+      (piece) => piece.definitionId === definitionId,
+    );
+  }
+
+  private countPiecesByDefinitionId(definitionId: string): number {
+    return this.constructionGrid.pieces.filter(
+      (piece) => piece.definitionId === definitionId,
+    ).length;
+  }
+
   private getAntTrafficRoute(
     gridArea: GridArea,
   ): readonly { readonly x: number; readonly y: number }[] {
@@ -2425,6 +2777,28 @@ export class ConstructionGridRenderer {
     );
   }
 
+  private drawCarrierAntSprite(
+    gridArea: GridArea,
+    x: number,
+    y: number,
+    angle: number,
+    cargoColor: number,
+    antIndex: number,
+  ): void {
+    this.drawAntSprite(gridArea, x, y, angle, antIndex);
+
+    const cargoDistance = Math.max(3, gridArea.cellSize * 0.12);
+    const cargoX = x + Math.cos(angle + Math.PI / 2) * cargoDistance;
+    const cargoY = y + Math.sin(angle + Math.PI / 2) * cargoDistance;
+
+    this.graphics.fillStyle(cargoColor, 0.94);
+    this.graphics.fillCircle(
+      cargoX,
+      cargoY,
+      Math.max(2, gridArea.cellSize * 0.04),
+    );
+  }
+
   public destroy(): void {
     this.clearActionHintLabel();
     this.clearEntranceCounterLabels();
@@ -2630,32 +3004,81 @@ export class ConstructionGridRenderer {
 
     const rect = this.getGalleryRect(gridArea, queenChamber);
     const centerX = rect.x + rect.width / 2;
-    const centerY = rect.y + rect.height / 2;
-    const bodyWidth = rect.width * 0.36;
-    const bodyHeight = rect.height * 0.28;
-    const headRadius = Math.max(4, gridArea.cellSize * 0.12);
+    const centerY = rect.y + rect.height * 0.54;
+    const abdomenWidth = rect.width * 0.52;
+    const abdomenHeight = rect.height * 0.32;
+    const thoraxWidth = rect.width * 0.26;
+    const thoraxHeight = rect.height * 0.18;
+    const headRadius = Math.max(6, gridArea.cellSize * 0.16);
+    const antennaLength = rect.width * 0.12;
+    const legLength = rect.width * 0.16;
+    const abdomenY = centerY + abdomenHeight * 0.08;
+    const thoraxY = centerY - thoraxHeight * 0.08;
+    const headY = centerY - thoraxHeight * 0.58;
+
+    this.graphics.lineStyle(2, constructionGridPalette.queenBody, 0.52);
+    [-1, 1].forEach((direction) => {
+      this.graphics.lineBetween(
+        centerX + direction * thoraxWidth * 0.3,
+        thoraxY - thoraxHeight * 0.18,
+        centerX + direction * legLength,
+        thoraxY - thoraxHeight * 0.8,
+      );
+      this.graphics.lineBetween(
+        centerX + direction * thoraxWidth * 0.34,
+        thoraxY + thoraxHeight * 0.05,
+        centerX + direction * legLength * 1.08,
+        thoraxY,
+      );
+      this.graphics.lineBetween(
+        centerX + direction * thoraxWidth * 0.28,
+        thoraxY + thoraxHeight * 0.22,
+        centerX + direction * legLength,
+        thoraxY + thoraxHeight * 0.78,
+      );
+    });
 
     this.graphics.fillStyle(constructionGridPalette.queenBody, 0.9);
     this.graphics.fillEllipse(
       centerX,
-      centerY + bodyHeight * 0.22,
-      bodyWidth,
-      bodyHeight,
+      abdomenY,
+      abdomenWidth,
+      abdomenHeight,
+    );
+    this.graphics.fillEllipse(
+      centerX,
+      thoraxY,
+      thoraxWidth,
+      thoraxHeight,
     );
     this.graphics.fillStyle(constructionGridPalette.queenAccent, 0.92);
-    this.graphics.fillCircle(centerX, centerY - bodyHeight * 0.3, headRadius);
+    this.graphics.fillCircle(centerX, headY, headRadius);
+    this.graphics.fillStyle(constructionGridPalette.galleryHighlight, 0.14);
+    this.graphics.fillEllipse(
+      centerX,
+      abdomenY - abdomenHeight * 0.15,
+      abdomenWidth * 0.58,
+      abdomenHeight * 0.2,
+    );
+    this.graphics.fillStyle(constructionGridPalette.galleryHighlight, 0.12);
+    this.graphics.fillEllipse(
+      centerX,
+      thoraxY - thoraxHeight * 0.12,
+      thoraxWidth * 0.48,
+      thoraxHeight * 0.18,
+    );
     this.graphics.lineStyle(2, constructionGridPalette.queenAccent, 0.72);
     this.graphics.lineBetween(
-      centerX - headRadius * 1.4,
-      centerY - bodyHeight * 0.85,
+      centerX - headRadius * 0.5,
+      headY - headRadius * 0.2,
       centerX,
-      centerY - bodyHeight * 1.18,
+      headY - antennaLength,
     );
     this.graphics.lineBetween(
       centerX,
-      centerY - bodyHeight * 1.18,
-      centerX + headRadius * 1.4,
-      centerY - bodyHeight * 0.85,
+      headY - antennaLength,
+      centerX + headRadius * 0.5,
+      headY - headRadius * 0.2,
     );
     this.drawQueenStatusLabel(gridArea, rect);
   }

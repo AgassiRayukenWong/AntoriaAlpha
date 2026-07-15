@@ -1,5 +1,6 @@
 import { BrowserRuntimeLifecycle } from '@/game/engine/browser-runtime-lifecycle';
 import { GameRuntime } from '@/game/engine/game-runtime';
+import { emitGameRuntimeSnapshotEvent } from '@/game/engine/runtime-snapshot-event';
 import type { ConstructionGridPosition } from '@/game/simulation/construction-grid';
 
 import {
@@ -22,6 +23,7 @@ export const createMainScene = (
     private browserRuntimeLifecycle?: BrowserRuntimeLifecycle;
     private constructionRevision = 0;
     private gameRuntime?: GameRuntime;
+    private gameRuntimeSnapshotUnsubscribe?: () => void;
     private floatingMenuSlideProgress = 0;
     private gridScrollY = 0;
     private isFloatingMenuCollapsed = false;
@@ -50,6 +52,10 @@ export const createMainScene = (
 
     public create(): void {
       this.gameRuntime = new GameRuntime();
+      this.gameRuntimeSnapshotUnsubscribe =
+        this.gameRuntime.subscribeToSnapshots((snapshot) => {
+          emitGameRuntimeSnapshotEvent(window, snapshot);
+        });
       this.browserRuntimeLifecycle = new BrowserRuntimeLifecycle({
         document,
         runtime: this.gameRuntime,
@@ -60,6 +66,7 @@ export const createMainScene = (
         this.add,
         Phaser,
       );
+      this.syncColonyRoomCounts();
       this.input.mouse?.disableContextMenu();
       this.input.on(
         Phaser.Input.Events.POINTER_MOVE,
@@ -121,6 +128,8 @@ export const createMainScene = (
       document.removeEventListener('keydown', this.handleDocumentKeyDown);
       this.browserRuntimeLifecycle?.stop();
       this.browserRuntimeLifecycle = undefined;
+      this.gameRuntimeSnapshotUnsubscribe?.();
+      this.gameRuntimeSnapshotUnsubscribe = undefined;
       this.constructionGridRenderer?.destroy();
       this.constructionGridRenderer = undefined;
       this.gameRuntime?.dispose();
@@ -232,6 +241,7 @@ export const createMainScene = (
         pointer.rightButtonDown() &&
         this.removeGalleryAtSelectedPosition()
       ) {
+        this.syncColonyRoomCounts();
         this.constructionRevision += 1;
         this.drawScene();
         return;
@@ -241,6 +251,7 @@ export const createMainScene = (
         pointer.leftButtonDown() &&
         this.applyActiveToolAtSelectedPosition()
       ) {
+        this.syncColonyRoomCounts();
         this.constructionRevision += 1;
       }
 
@@ -404,6 +415,16 @@ export const createMainScene = (
         this.gridScrollY,
         0,
         maximumGridScrollY,
+      );
+    }
+
+    private syncColonyRoomCounts(): void {
+      if (!this.gameRuntime || !this.constructionGridRenderer) {
+        return;
+      }
+
+      this.gameRuntime.setColonyRoomCounts(
+        this.constructionGridRenderer.getColonyRoomCounts(),
       );
     }
 

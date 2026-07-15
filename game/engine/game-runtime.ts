@@ -3,6 +3,11 @@ import {
   type GameRuntimeOptions,
 } from '@/game/engine/game-runtime-config';
 import {
+  ColonyEconomySystem,
+  type ColonyEconomySnapshot,
+  type ColonyRoomCounts,
+} from '@/game/simulation/colony-economy';
+import {
   GameClock,
   type GameClockSnapshot,
 } from '@/game/simulation/game-clock';
@@ -12,6 +17,7 @@ import {
 } from '@/game/simulation/simulation-engine';
 
 export interface GameRuntimeSnapshot {
+  readonly colony: ColonyEconomySnapshot;
   readonly isPaused: boolean;
   readonly maximumDeltaTimeMs: number;
   readonly simulation: GameClockSnapshot;
@@ -24,6 +30,7 @@ export type GameRuntimeSnapshotListener = (
 export type GameRuntimeSnapshotUnsubscribe = () => void;
 
 export class GameRuntime {
+  private readonly colonyEconomySystem: ColonyEconomySystem;
   private isPaused = false;
   private readonly maximumDeltaTimeMs: number;
   private readonly simulationEngine: SimulationEngine;
@@ -33,6 +40,7 @@ export class GameRuntime {
     this.maximumDeltaTimeMs =
       options.maximumDeltaTimeMs ??
       DEFAULT_GAME_RUNTIME_CONFIG.maximumDeltaTimeMs;
+    this.colonyEconomySystem = new ColonyEconomySystem();
     this.simulationEngine = new SimulationEngine({
       clock: new GameClock({
         tickDurationMs:
@@ -59,6 +67,22 @@ export class GameRuntime {
     const stepResult = this.simulationEngine.step(
       this.clampDeltaTime(deltaTimeMs),
     );
+    const tickDurationMs = this.simulationEngine.getSnapshot().tickDurationMs;
+
+    for (
+      let processedTickIndex = 0;
+      processedTickIndex < stepResult.processedTickCount;
+      processedTickIndex += 1
+    ) {
+      const tickIndex =
+        stepResult.totalTickCount - stepResult.processedTickCount + processedTickIndex + 1;
+
+      this.colonyEconomySystem.update({
+        simulationTimeMs: tickIndex * tickDurationMs,
+        tickDurationMs,
+        tickIndex,
+      });
+    }
 
     this.notifySnapshotListeners();
 
@@ -77,6 +101,7 @@ export class GameRuntime {
 
   public reset(): void {
     this.simulationEngine.reset();
+    this.colonyEconomySystem.reset();
     this.notifySnapshotListeners();
   }
 
@@ -87,10 +112,16 @@ export class GameRuntime {
 
   public getSnapshot(): GameRuntimeSnapshot {
     return {
+      colony: this.colonyEconomySystem.getSnapshot(),
       isPaused: this.isPaused,
       maximumDeltaTimeMs: this.maximumDeltaTimeMs,
       simulation: this.simulationEngine.getSnapshot(),
     };
+  }
+
+  public setColonyRoomCounts(roomCounts: ColonyRoomCounts): void {
+    this.colonyEconomySystem.setRoomCounts(roomCounts);
+    this.notifySnapshotListeners();
   }
 
   public subscribeToSnapshots(

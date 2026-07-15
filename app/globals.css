@@ -71,19 +71,144 @@ a {
 
 .main-navigation {
   display: flex;
-  min-height: 3.75rem;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  min-height: 4.5rem;
   align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
   border-bottom: 0.0625rem solid var(--border);
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
   padding-inline: clamp(1rem, 4vw, 3rem);
+  backdrop-filter: blur(0.5rem);
 }
 
 .main-navigation__brand {
+  flex: 0 0 auto;
   color: var(--accent);
   font-size: 1.125rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.main-navigation__metrics {
+  display: flex;
+  position: relative;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.main-navigation__metrics::-webkit-scrollbar {
+  display: none;
+}
+
+.main-navigation__metric {
+  display: flex;
+  min-width: max-content;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.main-navigation__metric-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  border: 0.0625rem solid
+    color-mix(in srgb, var(--color-stone-500) 24%, transparent);
+  border-radius: 999rem;
+  background:
+    linear-gradient(
+      180deg,
+      rgb(231 231 223 / 0.03),
+      rgb(0 0 0 / 0.08)
+    ),
+    color-mix(in srgb, var(--color-earth-900) 86%, transparent);
+  padding: 0.34rem 0.58rem 0.34rem 0.42rem;
+  box-shadow:
+    inset 0 0 0 0.0625rem rgb(231 231 223 / 0.03),
+    0 0.4rem 1.25rem rgb(0 0 0 / 0.16);
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.main-navigation__metric:hover .main-navigation__metric-main {
+  transform: translateY(-0.0625rem);
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  box-shadow:
+    inset 0 0 0 0.0625rem rgb(231 231 223 / 0.03),
+    0 0.6rem 1.5rem rgb(0 0 0 / 0.2);
+}
+
+.main-navigation__metric-icon {
+  display: inline-flex;
+  width: 1.3rem;
+  height: 1.3rem;
+  align-items: center;
+  justify-content: center;
+  border: 0.0625rem solid
+    color-mix(in srgb, var(--color-moss-400) 18%, transparent);
+  border-radius: 999rem;
+  background:
+    radial-gradient(circle at 30% 30%, rgb(231 231 223 / 0.1), transparent 60%),
+    color-mix(in srgb, var(--color-earth-900) 72%, transparent);
+  color: var(--accent);
+}
+
+.main-navigation__metric-icon-svg {
+  width: 0.72rem;
+  height: 0.72rem;
+}
+
+.main-navigation__metric-value {
+  color: var(--color-stone-100);
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+.main-navigation__metric-tooltip {
+  position: fixed;
+  z-index: 30;
+  display: grid;
+  min-width: max-content;
+  gap: 0.12rem;
+  pointer-events: none;
+  border: 0.0625rem solid
+    color-mix(in srgb, var(--color-stone-500) 35%, transparent);
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, var(--color-earth-900) 94%, transparent);
+  padding: 0.42rem 0.55rem;
+  box-shadow:
+    0 0.55rem 1.4rem rgb(0 0 0 / 0.24),
+    inset 0 0 0 0.0625rem rgb(231 231 223 / 0.03);
+  backdrop-filter: blur(0.3rem);
+  white-space: nowrap;
+}
+
+.main-navigation__metric-tooltip-title {
+  color: var(--color-stone-100);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.main-navigation__metric-tooltip-value {
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.15;
 }
 
 .site-main,
@@ -136,6 +261,6 @@ a {
 
 @media (min-width: 48rem) {
   .main-navigation {
-    min-height: 4.25rem;
+    min-height: 5rem;
   }
 }

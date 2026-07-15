@@ -118,6 +118,18 @@ describe('GameRuntime', () => {
     gameRuntime.pause();
 
     expect(gameRuntime.getSnapshot()).toEqual({
+      colony: {
+        food: 12,
+        foodCapacity: 20,
+        larvae: 0,
+        roomCounts: {
+          broodChamberCount: 0,
+          fungusFarmCount: 0,
+          queenChamberCount: 0,
+          storageCount: 0,
+        },
+        workers: 4,
+      },
       isPaused: true,
       maximumDeltaTimeMs: 250,
       simulation: {
@@ -141,6 +153,7 @@ describe('GameRuntime', () => {
     expect(listener).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
+        colony: expect.any(Object),
         isPaused: false,
       }),
     );
