@@ -1981,6 +1981,7 @@ export class ConstructionGridRenderer {
       true,
     );
     label.setDepth(1);
+    this.drawInfoTooltipPanel(gridArea, label, 1);
     this.selectedInfoLabel = label;
   }
 
@@ -2009,15 +2010,10 @@ export class ConstructionGridRenderer {
       pointer.y - Math.max(14, gridArea.cellSize * 0.2),
       this.getPieceStatusLabel('Survol', piece),
       {
-        backgroundColor: '#17130f',
         color: constructionGridPalette.textWarning,
         fontFamily: 'Arial, Helvetica, sans-serif',
         fontSize: `${Math.max(11, Math.round(gridArea.cellSize * 0.17))}px`,
         fontStyle: '700',
-        padding: {
-          x: Math.max(8, Math.round(gridArea.cellSize * 0.12)),
-          y: Math.max(5, Math.round(gridArea.cellSize * 0.08)),
-        },
         resolution: constructionTextResolution,
       },
     );
@@ -2032,7 +2028,37 @@ export class ConstructionGridRenderer {
       true,
     );
     label.setDepth(3);
+    this.drawInfoTooltipPanel(gridArea, label, 3);
     this.hoveredInfoLabel = label;
+  }
+
+  private drawInfoTooltipPanel(
+    gridArea: GridArea,
+    label: PhaserType.GameObjects.Text,
+    depth: number,
+  ): void {
+    const bounds = label.getBounds();
+    const paddingX = Math.max(8, gridArea.cellSize * 0.14);
+    const paddingY = Math.max(5, gridArea.cellSize * 0.09);
+    const cornerRadius = Math.max(8, gridArea.cellSize * 0.16);
+
+    this.graphics.fillStyle(constructionGridPalette.panelFill, 0.94);
+    this.graphics.fillRoundedRect(
+      bounds.x - paddingX,
+      bounds.y - paddingY,
+      bounds.width + paddingX * 2,
+      bounds.height + paddingY * 2,
+      cornerRadius,
+    );
+    this.graphics.lineStyle(1.5, constructionGridPalette.gridBorder, 0.62);
+    this.graphics.strokeRoundedRect(
+      bounds.x - paddingX,
+      bounds.y - paddingY,
+      bounds.width + paddingX * 2,
+      bounds.height + paddingY * 2,
+      cornerRadius,
+    );
+    label.setDepth(depth + 1);
   }
 
   private drawNetworkStatusLabel(
