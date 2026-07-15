@@ -119,14 +119,25 @@ describe('GameRuntime', () => {
 
     expect(gameRuntime.getSnapshot()).toEqual({
       colony: {
+        colonyExperience: 4,
+        colonyExperienceProgress: 4,
+        colonyExperienceToNextLevel: 5,
+        colonyLevel: 1,
         food: 12,
         foodCapacity: 20,
+        gold: 80,
         larvae: 0,
         roomCounts: {
           broodChamberCount: 0,
           fungusFarmCount: 0,
           queenChamberCount: 0,
           storageCount: 0,
+        },
+        roomUpgradeTotals: {
+          broodChamberLevelTotal: 0,
+          fungusFarmLevelTotal: 0,
+          queenChamberLevelTotal: 0,
+          storageLevelTotal: 0,
         },
         workers: 4,
       },
@@ -195,5 +206,26 @@ describe('GameRuntime', () => {
 
     expect(listener).toHaveBeenCalledOnce();
     expect(gameRuntime.getSnapshot().isPaused).toBe(true);
+  });
+
+  it('spends gold when upgrading an eligible room', () => {
+    const gameRuntime = new GameRuntime({ simulationTickDurationMs: 100 });
+
+    expect(gameRuntime.tryUpgradeRoom('queen-chamber', 1)).toBe(true);
+    expect(gameRuntime.getSnapshot().colony.gold).toBe(50);
+  });
+
+  it('spends gold when purchasing construction', () => {
+    const gameRuntime = new GameRuntime({ simulationTickDurationMs: 100 });
+
+    expect(gameRuntime.tryPurchaseConstruction(6)).toBe(true);
+    expect(gameRuntime.getSnapshot().colony.gold).toBe(74);
+  });
+
+  it('refuses construction purchase when gold is insufficient', () => {
+    const gameRuntime = new GameRuntime({ simulationTickDurationMs: 100 });
+
+    expect(gameRuntime.tryPurchaseConstruction(999)).toBe(false);
+    expect(gameRuntime.getSnapshot().colony.gold).toBe(80);
   });
 });

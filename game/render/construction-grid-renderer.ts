@@ -1,4 +1,8 @@
-import type { ColonyRoomCounts } from '@/game/simulation/colony-economy';
+import type {
+  ColonyEconomySnapshot,
+  ColonyRoomCounts,
+  ColonyRoomUpgradeTotals,
+} from '@/game/simulation/colony-economy';
 import {
   areGalleryPiecesAdjacent,
   areGalleryPiecesConnected,
@@ -21,6 +25,11 @@ import {
   createGalleryPieceFromDefinition,
   findGalleryPieceDefinition,
 } from '@/game/simulation/gallery-piece-catalog';
+import {
+  getRoomUpgradeRequirement,
+  isRoomUpgradeable,
+} from '@/game/simulation/room-upgrades';
+import { getConstructionCost } from '@/game/simulation/construction-costs';
 
 import type PhaserType from 'phaser';
 
@@ -79,6 +88,11 @@ interface RoomVisualStyle {
   readonly fillColor: number;
 }
 
+export interface PieceUpgradeRequest {
+  readonly currentLevel: number;
+  readonly definitionId: string;
+}
+
 export interface ConstructionGridPointer {
   readonly x: number;
   readonly y: number;
@@ -87,6 +101,7 @@ export interface ConstructionGridPointer {
 export enum ConstructionToolMode {
   Build = 'build',
   Destroy = 'destroy',
+  Improve = 'improve',
 }
 
 export enum ConstructionPieceType {
@@ -123,6 +138,8 @@ const constructionGridPalette = {
   gridHover: 0xd0b071,
   gridBlockedSelection: 0xd46a56,
   gridSelection: 0xf0c76a,
+  improveAvailable: 0xf0c76a,
+  improveBlocked: 0x7b6c57,
   pieceSelection: 0xf0c76a,
   queenAccent: 0xf0c76a,
   queenBody: 0x8a4f28,
@@ -148,40 +165,35 @@ const constructionGridPalette = {
 const constructionToolModeLabels = {
   [ConstructionToolMode.Build]: 'Construire',
   [ConstructionToolMode.Destroy]: 'D\u00e9truire',
+  [ConstructionToolMode.Improve]: 'Am\u00e9liorer',
 } as const satisfies Record<ConstructionToolMode, string>;
 
 const constructionTextResolution = 2;
 
 const constructionPieceTypeLabels = {
   [ConstructionPieceType.Gallery]: {
-    costLabel: 'Co\u00fbt 1',
     keyLabel: '1',
     nameLabel: 'Galerie',
   },
   [ConstructionPieceType.BroodChamber]: {
-    costLabel: 'Co\u00fbt 4',
     keyLabel: '2',
     nameLabel: 'Ponte',
   },
   [ConstructionPieceType.Barracks]: {
-    costLabel: 'Co\u00fbt 6',
     keyLabel: '3',
     nameLabel: 'Caserne',
   },
   [ConstructionPieceType.Storage]: {
-    costLabel: 'Co\u00fbt 5',
     keyLabel: '4',
     nameLabel: 'Entrep\u00f4t',
   },
   [ConstructionPieceType.FungusFarm]: {
-    costLabel: 'Co\u00fbt 5',
     keyLabel: '5',
     nameLabel: 'Champi',
   },
 } as const satisfies Record<
   ConstructionPieceType,
   {
-    readonly costLabel: string;
     readonly keyLabel: string;
     readonly nameLabel: string;
   }
@@ -349,6 +361,7 @@ const constructionGridLayout = {
 
 export class ConstructionGridRenderer {
   private actionHintLabel?: PhaserType.GameObjects.Text;
+  private colonySnapshot?: ColonyEconomySnapshot;
   private constructionGrid: ConstructionGrid;
   private entranceCounterLabels: PhaserType.GameObjects.Text[] = [];
   private hoveredInfoLabel?: PhaserType.GameObjects.Text;
@@ -361,6 +374,7 @@ export class ConstructionGridRenderer {
   private selectedInfoLabel?: PhaserType.GameObjects.Text;
   private toolButtonAreas: readonly ToolButtonArea[] = [];
   private toolModeLabel?: PhaserType.GameObjects.Text;
+  private readonly pieceLevels = new Map<string, number>();
   private placedGalleryIndex = 1;
 
   public constructor(
@@ -388,7 +402,9 @@ export class ConstructionGridRenderer {
     isFloatingMenuCollapsed = false,
     floatingMenuSlideProgress = isFloatingMenuCollapsed ? 1 : 0,
     antAnimationTimeMs = 0,
+    colonySnapshot?: ColonyEconomySnapshot,
   ): void {
+    this.colonySnapshot = colonySnapshot;
     const gridArea = this.createGridArea(width, height, gridScrollY);
     const viewportGridArea = this.createGridArea(width, height);
     const floatingMenuOffsetX = this.getFloatingMenuOffsetX(
@@ -426,12 +442,20 @@ export class ConstructionGridRenderer {
     this.drawSoilTexture(width, height);
     this.drawSoftLight(width, height, gridArea);
     this.drawGrid(gridArea);
-    this.drawSelectedGridCell(gridArea, selectedPosition, selectedPieceType);
+    this.drawSelectedGridCell(
+      gridArea,
+      selectedPosition,
+      toolMode,
+      selectedPieceType,
+    );
     this.drawGalleryPieces(gridArea, this.constructionGrid.pieces);
+    if (toolMode === ConstructionToolMode.Improve) {
+      this.drawImproveModeRoomStates(gridArea, this.constructionGrid.pieces);
+    }
     this.drawQueenAnchor(gridArea);
     this.drawRoomActivity(gridArea, antAnimationTimeMs);
     this.drawAntTraffic(gridArea, antAnimationTimeMs);
-    this.drawSelectedPiece(gridArea, selectedPosition);
+    this.drawSelectedPiece(gridArea, selectedPosition, toolMode);
     if (floatingMenuSlideProgress < 1) {
       this.drawFloatingMenuPanel(viewportGridArea, floatingMenuRect);
       this.drawToolModeLabel(viewportGridArea, toolMode, floatingMenuOffsetX);
@@ -457,6 +481,10 @@ export class ConstructionGridRenderer {
     pointer: ConstructionGridPointer,
     gridScrollY = 0,
   ): ConstructionGridPosition | undefined {
+    if (this.isPointInsideFloatingMenuInteractionArea(pointer)) {
+      return undefined;
+    }
+
     const gridArea = this.createGridArea(width, height, gridScrollY);
     const position = this.getGridPositionAtPoint(gridArea, pointer);
 
@@ -481,6 +509,15 @@ export class ConstructionGridRenderer {
       fungusFarmCount: this.countPiecesByDefinitionId('fungus-farm'),
       queenChamberCount: this.findQueenChamber() === undefined ? 0 : 1,
       storageCount: this.countPiecesByDefinitionId('storage'),
+    };
+  }
+
+  public getColonyRoomUpgradeTotals(): ColonyRoomUpgradeTotals {
+    return {
+      broodChamberLevelTotal: this.getTotalLevelForDefinitionId('brood-chamber'),
+      fungusFarmLevelTotal: this.getTotalLevelForDefinitionId('fungus-farm'),
+      queenChamberLevelTotal: this.getTotalLevelForDefinitionId('queen-chamber'),
+      storageLevelTotal: this.getTotalLevelForDefinitionId('storage'),
     };
   }
 
@@ -603,6 +640,10 @@ export class ConstructionGridRenderer {
     position: ConstructionGridPosition,
     pieceType: ConstructionPieceType,
   ): boolean {
+    if (!this.canAffordConstructionPiece(pieceType)) {
+      return false;
+    }
+
     const piece = this.createConstructionPieceForPosition(position, pieceType);
 
     try {
@@ -659,11 +700,47 @@ export class ConstructionGridRenderer {
     const occupiedPositions = getGalleryPieceOccupiedPositions(piece);
 
     this.constructionGrid = removeGalleryPiece(this.constructionGrid, piece.id);
+    this.pieceLevels.delete(piece.id);
     occupiedPositions.forEach((occupiedPosition) => {
       this.refreshGalleryPiecesAroundPosition(occupiedPosition);
     });
 
     return true;
+  }
+
+  public tryUpgradePieceAtPosition(
+    position: ConstructionGridPosition,
+  ): boolean {
+    const piece = this.findPieceAtPosition(position);
+
+    if (piece === undefined) {
+      return false;
+    }
+
+    const requirement = this.getPieceUpgradeRequirement(piece);
+
+    if (requirement === undefined) {
+      return false;
+    }
+
+    this.pieceLevels.set(piece.id, requirement.nextLevel);
+
+    return true;
+  }
+
+  public getPieceUpgradeRequestAtPosition(
+    position: ConstructionGridPosition,
+  ): PieceUpgradeRequest | undefined {
+    const piece = this.findPieceAtPosition(position);
+
+    if (piece?.definitionId === undefined) {
+      return undefined;
+    }
+
+    return {
+      currentLevel: this.getPieceLevel(piece),
+      definitionId: piece.definitionId,
+    };
   }
 
   private wouldExceedRoomEntranceLimit(piece: GalleryPiece): boolean {
@@ -1148,7 +1225,7 @@ export class ConstructionGridRenderer {
     const rowGap = Math.max(10, gridArea.cellSize * 0.15);
     const toolButtonWidth = Math.max(84, gridArea.cellSize * 1.85);
     const toolButtonHeight = Math.max(24, gridArea.cellSize * 0.36);
-    const toolButtonsWidth = toolButtonWidth * 2 + rowGap;
+    const toolButtonsWidth = toolButtonWidth * 3 + rowGap * 2;
     const pieceButtonWidth = Math.max(
       220,
       gridArea.cellSize * 4.1,
@@ -1197,7 +1274,7 @@ export class ConstructionGridRenderer {
   ): void {
     const cornerRadius = Math.max(10, gridArea.cellSize * 0.16);
 
-    this.graphics.fillStyle(constructionGridPalette.panelFill, 0.82);
+    this.graphics.fillStyle(constructionGridPalette.panelFill, 1);
     this.graphics.fillRoundedRect(
       rect.x,
       rect.y,
@@ -1265,7 +1342,7 @@ export class ConstructionGridRenderer {
       isHovered
         ? constructionGridPalette.toolButtonActiveFill
         : constructionGridPalette.panelFill,
-      isHovered ? 0.96 : 0.84,
+      1,
     );
     this.graphics.fillRoundedRect(
       area.x,
@@ -1321,7 +1398,7 @@ export class ConstructionGridRenderer {
     const tooltipY = area.y + area.height / 2 - tooltipHeight / 2;
     const cornerRadius = Math.max(6, gridArea.cellSize * 0.09);
 
-    this.graphics.fillStyle(constructionGridPalette.panelFill, 0.94);
+    this.graphics.fillStyle(constructionGridPalette.panelFill, 1);
     this.graphics.fillRoundedRect(
       tooltipX,
       tooltipY,
@@ -1406,6 +1483,13 @@ export class ConstructionGridRenderer {
         x: x + buttonWidth + gap,
         y,
       },
+      {
+        height: buttonHeight,
+        mode: ConstructionToolMode.Improve,
+        width: buttonWidth,
+        x: x + (buttonWidth + gap) * 2,
+        y,
+      },
     ];
   }
 
@@ -1444,7 +1528,7 @@ export class ConstructionGridRenderer {
       const label = this.gameObjects.text(
         area.x + area.width / 2,
         area.y + area.height / 2,
-        `${area.mode === ConstructionToolMode.Build ? 'B' : 'D'} ${
+        `${this.getToolModeKeyLabel(area.mode)} ${
           constructionToolModeLabels[area.mode]
         }`,
         {
@@ -1462,6 +1546,17 @@ export class ConstructionGridRenderer {
       label.setDepth(1);
       this.entranceCounterLabels.push(label);
     });
+  }
+
+  private getToolModeKeyLabel(mode: ConstructionToolMode): 'B' | 'D' | 'E' {
+    switch (mode) {
+      case ConstructionToolMode.Build:
+        return 'B';
+      case ConstructionToolMode.Destroy:
+        return 'D';
+      case ConstructionToolMode.Improve:
+        return 'E';
+    }
   }
 
   private createConstructionPieceButtonAreas(
@@ -1528,15 +1623,20 @@ export class ConstructionGridRenderer {
     selectedPieceType: ConstructionPieceType,
   ): void {
     const isActive = area.pieceType === selectedPieceType;
+    const canAfford = this.canAffordConstructionPiece(area.pieceType);
     const cornerRadius = Math.max(6, gridArea.cellSize * 0.1);
-    const fillColor = isActive
-      ? constructionGridPalette.toolButtonActiveFill
-      : constructionGridPalette.toolButtonInactiveFill;
-    const borderColor = isActive
-      ? constructionGridPalette.ghostStroke
-      : constructionGridPalette.gridBorder;
+    const fillColor = !canAfford
+      ? constructionGridPalette.base
+      : isActive
+        ? constructionGridPalette.toolButtonActiveFill
+        : constructionGridPalette.toolButtonInactiveFill;
+    const borderColor = !canAfford
+      ? constructionGridPalette.improveBlocked
+      : isActive
+        ? constructionGridPalette.ghostStroke
+        : constructionGridPalette.gridBorder;
 
-    this.graphics.fillStyle(fillColor, isActive ? 0.95 : 0.86);
+    this.graphics.fillStyle(fillColor, !canAfford ? 0.7 : isActive ? 0.95 : 0.86);
     this.graphics.fillRoundedRect(
       area.x,
       area.y,
@@ -1555,9 +1655,11 @@ export class ConstructionGridRenderer {
 
     const pieceLabel = constructionPieceTypeLabels[area.pieceType];
     const pieceCount = this.getConstructionPieceCount(area.pieceType);
-    const textColor = isActive
-      ? constructionGridPalette.textWarning
-      : '#b4b5aa';
+    const textColor = !canAfford
+      ? '#736e63'
+      : isActive
+        ? constructionGridPalette.textWarning
+        : '#b4b5aa';
     const keyLabel = this.gameObjects.text(
       area.x + area.height * 0.5,
       area.y + area.height / 2,
@@ -1612,9 +1714,9 @@ export class ConstructionGridRenderer {
     const costLabel = this.gameObjects.text(
       area.x + area.width - area.height * 0.35,
       area.y + area.height / 2,
-      pieceLabel.costLabel,
+      `Co\u00fbt ${this.getConstructionPieceCost(area.pieceType)}`,
       {
-        color: isActive ? '#f6d98a' : '#8f927f',
+        color: !canAfford ? '#736e63' : isActive ? '#f6d98a' : '#8f927f',
         fontFamily: 'Arial, Helvetica, sans-serif',
         fontSize: `${Math.max(10, Math.round(gridArea.cellSize * 0.14))}px`,
         fontStyle: '700',
@@ -1643,12 +1745,78 @@ export class ConstructionGridRenderer {
     ).length;
   }
 
+  public getConstructionPieceCost(pieceType: ConstructionPieceType): number {
+    return getConstructionCost(this.getBuildableStructureType(pieceType));
+  }
+
+  private getBuildableStructureType(pieceType: ConstructionPieceType) {
+    if (pieceType === ConstructionPieceType.Gallery) {
+      return 'gallery' as const;
+    }
+
+    const definitionId = constructionPieceDefinitionIds[pieceType];
+
+    if (
+      definitionId === 'barracks' ||
+      definitionId === 'brood-chamber' ||
+      definitionId === 'fungus-farm' ||
+      definitionId === 'storage'
+    ) {
+      return definitionId;
+    }
+
+    return 'gallery' as const;
+  }
+
+  private canAffordConstructionPiece(pieceType: ConstructionPieceType): boolean {
+    if (this.colonySnapshot === undefined) {
+      return false;
+    }
+
+    return this.colonySnapshot.gold >= this.getConstructionPieceCost(pieceType);
+  }
+
+  private getPieceLevel(piece: GalleryPiece): number {
+    return this.pieceLevels.get(piece.id) ?? 1;
+  }
+
+  private getPieceUpgradeRequirement(piece: GalleryPiece) {
+    return getRoomUpgradeRequirement(
+      piece.definitionId,
+      this.getPieceLevel(piece),
+    );
+  }
+
+  private canUpgradePiece(piece: GalleryPiece): boolean {
+    if (this.colonySnapshot === undefined) {
+      return false;
+    }
+
+    const requirement = this.getPieceUpgradeRequirement(piece);
+
+    return (
+      requirement !== undefined &&
+      this.colonySnapshot.gold >= requirement.costGold &&
+      this.colonySnapshot.colonyLevel >= requirement.requiredColonyLevel
+    );
+  }
+
+  private getTotalLevelForDefinitionId(definitionId: string): number {
+    return this.constructionGrid.pieces
+      .filter((piece) => piece.definitionId === definitionId)
+      .reduce((totalLevel, piece) => totalLevel + this.getPieceLevel(piece), 0);
+  }
+
   private drawHoveredGridCell(
     gridArea: GridArea,
     pointer: ConstructionGridPointer | undefined,
+    toolMode: ConstructionToolMode,
     selectedPieceType: ConstructionPieceType,
   ): void {
-    if (pointer === undefined) {
+    if (
+      pointer === undefined ||
+      this.isPointInsideFloatingMenuInteractionArea(pointer)
+    ) {
       return;
     }
 
@@ -1660,10 +1828,10 @@ export class ConstructionGridRenderer {
 
     const x = gridArea.x + position.column * gridArea.cellSize;
     const y = gridArea.y + position.row * gridArea.cellSize;
-    const isBlocked = !this.canPlaceConstructionPieceAtPosition(
-      position,
-      selectedPieceType,
-    );
+    const isBlocked =
+      toolMode === ConstructionToolMode.Improve
+        ? !this.canUpgradePieceAtPosition(position)
+        : !this.canPlaceConstructionPieceAtPosition(position, selectedPieceType);
     const hoverColor = isBlocked
       ? constructionGridPalette.gridBlockedHover
       : constructionGridPalette.gridHover;
@@ -1682,7 +1850,10 @@ export class ConstructionGridRenderer {
     toolMode: ConstructionToolMode,
     selectedPieceType: ConstructionPieceType,
   ): void {
-    if (pointer === undefined) {
+    if (
+      pointer === undefined ||
+      this.isPointInsideFloatingMenuInteractionArea(pointer)
+    ) {
       return;
     }
 
@@ -1692,10 +1863,14 @@ export class ConstructionGridRenderer {
       return;
     }
 
-    this.drawHoveredGridCell(gridArea, pointer, selectedPieceType);
+    this.drawHoveredGridCell(gridArea, pointer, toolMode, selectedPieceType);
 
     if (toolMode === ConstructionToolMode.Destroy) {
       this.drawRemovalPreview(gridArea, position);
+      return;
+    }
+
+    if (toolMode === ConstructionToolMode.Improve) {
       return;
     }
 
@@ -1721,7 +1896,10 @@ export class ConstructionGridRenderer {
     toolMode: ConstructionToolMode,
     selectedPieceType: ConstructionPieceType,
   ): void {
-    if (pointer === undefined) {
+    if (
+      pointer === undefined ||
+      this.isPointInsideFloatingMenuInteractionArea(pointer)
+    ) {
       return;
     }
 
@@ -1772,6 +1950,10 @@ export class ConstructionGridRenderer {
       return this.getDestroyActionHintText(position);
     }
 
+    if (toolMode === ConstructionToolMode.Improve) {
+      return this.getImproveActionHintText(position);
+    }
+
     return this.getBuildActionHintText(position, selectedPieceType);
   }
 
@@ -1779,6 +1961,10 @@ export class ConstructionGridRenderer {
     position: ConstructionGridPosition,
     selectedPieceType: ConstructionPieceType,
   ): string {
+    if (!this.canAffordConstructionPiece(selectedPieceType)) {
+      return `${this.getConstructionPieceCost(selectedPieceType)} gold requis`;
+    }
+
     if (isGridPositionOccupied(this.constructionGrid, position)) {
       return 'Case occup\u00e9e';
     }
@@ -1807,6 +1993,38 @@ export class ConstructionGridRenderer {
     }
 
     return 'D\u00e9truire cette pi\u00e8ce';
+  }
+
+  private getImproveActionHintText(position: ConstructionGridPosition): string {
+    const piece = this.findPieceAtPosition(position);
+
+    if (piece === undefined) {
+      return 'Aucune pi\u00e8ce \u00e0 am\u00e9liorer';
+    }
+
+    if (!isRoomUpgradeable(piece.definitionId)) {
+      return 'Cette pi\u00e8ce ne s\u2019am\u00e9liore pas';
+    }
+
+    const requirement = this.getPieceUpgradeRequirement(piece);
+
+    if (requirement === undefined) {
+      return 'Niveau maximum atteint';
+    }
+
+    if (this.colonySnapshot === undefined) {
+      return 'Donn\u00e9es d\u2019am\u00e9lioration indisponibles';
+    }
+
+    if (this.colonySnapshot.colonyLevel < requirement.requiredColonyLevel) {
+      return `Niveau colonie ${requirement.requiredColonyLevel} requis`;
+    }
+
+    if (this.colonySnapshot.gold < requirement.costGold) {
+      return `${requirement.costGold} gold requis`;
+    }
+
+    return `Am\u00e9liorer vers niveau ${requirement.nextLevel}`;
   }
 
   private drawRemovalPreview(
@@ -1884,6 +2102,7 @@ export class ConstructionGridRenderer {
   private drawSelectedGridCell(
     gridArea: GridArea,
     selectedPosition: ConstructionGridPosition | undefined,
+    toolMode: ConstructionToolMode,
     selectedPieceType: ConstructionPieceType,
   ): void {
     if (selectedPosition === undefined) {
@@ -1892,10 +2111,13 @@ export class ConstructionGridRenderer {
 
     const x = gridArea.x + selectedPosition.column * gridArea.cellSize;
     const y = gridArea.y + selectedPosition.row * gridArea.cellSize;
-    const isBlocked = !this.canPlaceConstructionPieceAtPosition(
-      selectedPosition,
-      selectedPieceType,
-    );
+    const isBlocked =
+      toolMode === ConstructionToolMode.Improve
+        ? !this.canUpgradePieceAtPosition(selectedPosition)
+        : !this.canPlaceConstructionPieceAtPosition(
+            selectedPosition,
+            selectedPieceType,
+          );
     const selectionColor = isBlocked
       ? constructionGridPalette.gridBlockedSelection
       : constructionGridPalette.gridSelection;
@@ -1909,6 +2131,7 @@ export class ConstructionGridRenderer {
   private drawSelectedPiece(
     gridArea: GridArea,
     selectedPosition: ConstructionGridPosition | undefined,
+    toolMode: ConstructionToolMode,
   ): void {
     if (selectedPosition === undefined) {
       return;
@@ -1925,8 +2148,14 @@ export class ConstructionGridRenderer {
     const cornerRadius = this.isRoomPiece(piece)
       ? gridArea.cellSize * 0.32
       : gridArea.cellSize * 0.16;
+    const selectionColor =
+      toolMode === ConstructionToolMode.Improve
+        ? this.canUpgradePiece(piece)
+          ? constructionGridPalette.improveAvailable
+          : constructionGridPalette.gridBlockedSelection
+        : constructionGridPalette.pieceSelection;
 
-    this.graphics.lineStyle(3, constructionGridPalette.pieceSelection, 0.94);
+    this.graphics.lineStyle(3, selectionColor, 0.94);
     this.graphics.strokeRoundedRect(
       rect.x + padding,
       rect.y + padding,
@@ -1934,7 +2163,7 @@ export class ConstructionGridRenderer {
       rect.height - padding * 2,
       cornerRadius,
     );
-    this.graphics.lineStyle(1, constructionGridPalette.pieceSelection, 0.42);
+    this.graphics.lineStyle(1, selectionColor, 0.42);
     this.graphics.strokeRoundedRect(
       rect.x + padding * 2,
       rect.y + padding * 2,
@@ -1989,7 +2218,10 @@ export class ConstructionGridRenderer {
     gridArea: GridArea,
     pointer: ConstructionGridPointer | undefined,
   ): void {
-    if (pointer === undefined || this.isPointInsideFloatingMenuPanel(pointer)) {
+    if (
+      pointer === undefined ||
+      this.isPointInsideFloatingMenuInteractionArea(pointer)
+    ) {
       return;
     }
 
@@ -2144,16 +2376,36 @@ export class ConstructionGridRenderer {
       : undefined;
     const pieceLabel = definition?.label ?? 'Pi\u00e8ce';
 
-    if (piece.entranceLimit === undefined) {
-      return `${prefix} : ${pieceLabel}`;
-    }
-
     const entranceCount = countGalleryPieceEntrances(
       this.constructionGrid,
       piece,
     );
+    const level = this.getPieceLevel(piece);
+    const requirement = this.getPieceUpgradeRequirement(piece);
+    const baseLabel =
+      piece.entranceLimit === undefined
+        ? `${prefix} : ${pieceLabel}`
+        : `${prefix} : ${pieceLabel} - niv. ${level} - ${entranceCount}/${piece.entranceLimit} entr\u00e9es`;
 
-    return `${prefix} : ${pieceLabel} - ${entranceCount}/${piece.entranceLimit} entr\u00e9es`;
+    if (!isRoomUpgradeable(piece.definitionId)) {
+      return baseLabel;
+    }
+
+    if (requirement === undefined) {
+      return `${baseLabel}\nNiveau maximum`;
+    }
+
+    return `${baseLabel}\nAm\u00e9lioration : ${requirement.costGold} gold - colonie niv. ${requirement.requiredColonyLevel}`;
+  }
+
+  private canUpgradePieceAtPosition(position: ConstructionGridPosition): boolean {
+    const piece = this.findPieceAtPosition(position);
+
+    if (piece === undefined) {
+      return false;
+    }
+
+    return this.canUpgradePiece(piece);
   }
 
   private getGridPositionAtPoint(
@@ -2199,6 +2451,7 @@ export class ConstructionGridRenderer {
     this.drawNetworkStatusHighlights(gridArea, pieces);
     this.drawRoomEntranceMarkers(gridArea, pieces);
     this.drawRoomEntranceCounters(gridArea, pieces);
+    this.drawRoomLevelBadges(gridArea, pieces);
   }
 
   private drawAntTraffic(gridArea: GridArea, animationTimeMs: number): void {
@@ -3560,6 +3813,114 @@ export class ConstructionGridRenderer {
       });
   }
 
+  private drawRoomLevelBadges(
+    gridArea: GridArea,
+    pieces: readonly GalleryPiece[],
+  ): void {
+    pieces
+      .filter((piece) => this.isRoomPiece(piece))
+      .forEach((roomPiece) => {
+        const rect = this.getGalleryRect(gridArea, roomPiece);
+        const level = this.getPieceLevel(roomPiece);
+        const badgeWidth = Math.max(
+          gridArea.cellSize * 0.54,
+          Math.min(rect.width * 0.34, gridArea.cellSize * 0.9),
+        );
+        const badgeHeight = gridArea.cellSize * 0.28;
+        const badgeX = rect.x + gridArea.cellSize * 0.12;
+        const badgeY = rect.y + gridArea.cellSize * 0.12;
+        const visualStyle = this.getRoomVisualStyle(roomPiece);
+
+        this.graphics.fillStyle(constructionGridPalette.panelFill, 0.92);
+        this.graphics.fillRoundedRect(
+          badgeX,
+          badgeY,
+          badgeWidth,
+          badgeHeight,
+          gridArea.cellSize * 0.12,
+        );
+        this.graphics.lineStyle(1.4, visualStyle.accentColor, 0.7);
+        this.graphics.strokeRoundedRect(
+          badgeX,
+          badgeY,
+          badgeWidth,
+          badgeHeight,
+          gridArea.cellSize * 0.12,
+        );
+
+        const label = this.gameObjects.text(
+          badgeX + badgeWidth / 2,
+          badgeY + badgeHeight / 2,
+          `N${level}`,
+          {
+            color: constructionGridPalette.textWarning,
+            fontFamily: 'Arial, Helvetica, sans-serif',
+            fontSize: `${Math.max(10, Math.round(gridArea.cellSize * 0.16))}px`,
+            fontStyle: '700',
+            resolution: constructionTextResolution,
+          },
+        );
+
+        label.setOrigin(0.5);
+        label.setShadow(
+          1,
+          1,
+          constructionGridPalette.textShadow,
+          2,
+          true,
+          true,
+        );
+        label.setDepth(1);
+        this.entranceCounterLabels.push(label);
+      });
+  }
+
+  private drawImproveModeRoomStates(
+    gridArea: GridArea,
+    pieces: readonly GalleryPiece[],
+  ): void {
+    pieces
+      .filter((piece) => this.isRoomPiece(piece))
+      .forEach((roomPiece) => {
+        const rect = this.getGalleryRect(gridArea, roomPiece);
+        const padding = gridArea.cellSize * 0.06;
+        const cornerRadius = gridArea.cellSize * 0.32;
+        const canUpgrade = this.canUpgradePiece(roomPiece);
+
+        if (!canUpgrade) {
+          this.graphics.fillStyle(constructionGridPalette.base, 0.28);
+          this.graphics.fillRoundedRect(
+            rect.x + padding,
+            rect.y + padding,
+            rect.width - padding * 2,
+            rect.height - padding * 2,
+            cornerRadius,
+          );
+        }
+
+        const outlineColor = canUpgrade
+          ? constructionGridPalette.improveAvailable
+          : constructionGridPalette.improveBlocked;
+
+        this.graphics.lineStyle(2, outlineColor, canUpgrade ? 0.68 : 0.52);
+        this.graphics.strokeRoundedRect(
+          rect.x + padding,
+          rect.y + padding,
+          rect.width - padding * 2,
+          rect.height - padding * 2,
+          cornerRadius,
+        );
+        this.graphics.lineStyle(1, outlineColor, canUpgrade ? 0.3 : 0.24);
+        this.graphics.strokeRoundedRect(
+          rect.x + padding * 2,
+          rect.y + padding * 2,
+          rect.width - padding * 4,
+          rect.height - padding * 4,
+          cornerRadius * 0.84,
+        );
+      });
+  }
+
   private isRoomEntranceLimitReached(roomPiece: GalleryPiece): boolean {
     const entranceLimit = roomPiece.entranceLimit;
 
@@ -3616,6 +3977,15 @@ export class ConstructionGridRenderer {
       pointer.x <= this.floatingMenuRect.x + this.floatingMenuRect.width &&
       pointer.y >= this.floatingMenuRect.y &&
       pointer.y <= this.floatingMenuRect.y + this.floatingMenuRect.height
+    );
+  }
+
+  private isPointInsideFloatingMenuInteractionArea(
+    pointer: ConstructionGridPointer,
+  ): boolean {
+    return (
+      this.isPointInsideFloatingMenuPanel(pointer) ||
+      this.isPointInsideFloatingMenuToggle(pointer)
     );
   }
 
@@ -3745,7 +4115,73 @@ export class ConstructionGridRenderer {
     conduit: ConstructionGridConduit,
   ): void {
     const center = this.getCellCenter(gridArea, conduit.position);
-    const radius = gridArea.cellSize * 0.34;
+    const radius = gridArea.cellSize * 0.27;
+    const moundBaseWidth = gridArea.cellSize * 1.75;
+    const moundBaseHeight = gridArea.cellSize * 0.9;
+    const moundMidWidth = gridArea.cellSize * 1.2;
+    const moundMidHeight = gridArea.cellSize * 0.62;
+    const moundTopWidth = gridArea.cellSize * 0.78;
+    const moundTopHeight = gridArea.cellSize * 0.42;
+    const moundBaseY = center.y + gridArea.cellSize * 0.12;
+    const moundMidY = center.y + gridArea.cellSize * 0.05;
+    const moundTopY = center.y - gridArea.cellSize * 0.02;
+    const soilDark = 0x342317;
+    const soilMid = 0x513722;
+    const soilLight = 0x6a4a31;
+
+    this.graphics.fillStyle(soilDark, 0.96);
+    this.graphics.fillEllipse(
+      center.x,
+      moundBaseY,
+      moundBaseWidth,
+      moundBaseHeight,
+    );
+    this.graphics.fillStyle(soilMid, 0.94);
+    this.graphics.fillEllipse(
+      center.x,
+      moundMidY,
+      moundMidWidth,
+      moundMidHeight,
+    );
+    this.graphics.fillStyle(soilLight, 0.84);
+    this.graphics.fillEllipse(
+      center.x,
+      moundTopY,
+      moundTopWidth,
+      moundTopHeight,
+    );
+    this.graphics.fillStyle(constructionGridPalette.galleryHighlight, 0.1);
+    this.graphics.fillEllipse(
+      center.x,
+      moundTopY - gridArea.cellSize * 0.08,
+      moundTopWidth * 0.5,
+      moundTopHeight * 0.18,
+    );
+
+    const grainRadius = Math.max(1.5, gridArea.cellSize * 0.028);
+    const grainOffsets = [
+      { x: -0.34, y: 0.12 },
+      { x: -0.26, y: 0.02 },
+      { x: -0.18, y: 0.18 },
+      { x: -0.08, y: -0.02 },
+      { x: 0.04, y: 0.12 },
+      { x: 0.16, y: 0.04 },
+      { x: 0.26, y: 0.18 },
+      { x: 0.34, y: 0.08 },
+      { x: -0.22, y: 0.28 },
+      { x: 0.12, y: 0.26 },
+    ] as const;
+
+    grainOffsets.forEach((offset, index) => {
+      const grainColor = index % 3 === 0 ? soilLight : soilMid;
+
+      this.graphics.fillStyle(grainColor, 0.85);
+      this.graphics.fillCircle(
+        center.x + moundBaseWidth * offset.x * 0.5,
+        moundBaseY + moundBaseHeight * offset.y * 0.5,
+        grainRadius,
+      );
+    });
 
     this.graphics.fillStyle(constructionGridPalette.conduitFill, 0.95);
     this.graphics.fillCircle(center.x, center.y, radius);

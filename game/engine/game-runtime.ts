@@ -6,11 +6,13 @@ import {
   ColonyEconomySystem,
   type ColonyEconomySnapshot,
   type ColonyRoomCounts,
+  type ColonyRoomUpgradeTotals,
 } from '@/game/simulation/colony-economy';
 import {
   GameClock,
   type GameClockSnapshot,
 } from '@/game/simulation/game-clock';
+import { getRoomUpgradeRequirement } from '@/game/simulation/room-upgrades';
 import {
   SimulationEngine,
   type SimulationEngineStepResult,
@@ -119,8 +121,51 @@ export class GameRuntime {
     };
   }
 
+  public setColonyInfrastructure(
+    roomCounts: ColonyRoomCounts,
+    roomUpgradeTotals: ColonyRoomUpgradeTotals,
+  ): void {
+    this.colonyEconomySystem.setInfrastructure(roomCounts, roomUpgradeTotals);
+    this.notifySnapshotListeners();
+  }
+
+  public tryUpgradeRoom(
+    definitionId: string | undefined,
+    currentLevel: number,
+  ): boolean {
+    const requirement = getRoomUpgradeRequirement(definitionId, currentLevel);
+
+    if (requirement === undefined) {
+      return false;
+    }
+
+    const didPurchase =
+      this.colonyEconomySystem.tryPurchaseRoomUpgrade(requirement);
+
+    if (didPurchase) {
+      this.notifySnapshotListeners();
+    }
+
+    return didPurchase;
+  }
+
+  public tryPurchaseConstruction(costGold: number): boolean {
+    const didPurchase = this.colonyEconomySystem.trySpendGold(costGold);
+
+    if (didPurchase) {
+      this.notifySnapshotListeners();
+    }
+
+    return didPurchase;
+  }
+
   public setColonyRoomCounts(roomCounts: ColonyRoomCounts): void {
-    this.colonyEconomySystem.setRoomCounts(roomCounts);
+    this.colonyEconomySystem.setInfrastructure(roomCounts, {
+      broodChamberLevelTotal: roomCounts.broodChamberCount,
+      fungusFarmLevelTotal: roomCounts.fungusFarmCount,
+      queenChamberLevelTotal: roomCounts.queenChamberCount,
+      storageLevelTotal: roomCounts.storageCount,
+    });
     this.notifySnapshotListeners();
   }
 

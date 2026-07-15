@@ -66,7 +66,7 @@ export const createMainScene = (
         this.add,
         Phaser,
       );
-      this.syncColonyRoomCounts();
+      this.syncColonyInfrastructure();
       this.input.mouse?.disableContextMenu();
       this.input.on(
         Phaser.Input.Events.POINTER_MOVE,
@@ -241,7 +241,7 @@ export const createMainScene = (
         pointer.rightButtonDown() &&
         this.removeGalleryAtSelectedPosition()
       ) {
-        this.syncColonyRoomCounts();
+        this.syncColonyInfrastructure();
         this.constructionRevision += 1;
         this.drawScene();
         return;
@@ -251,7 +251,7 @@ export const createMainScene = (
         pointer.leftButtonDown() &&
         this.applyActiveToolAtSelectedPosition()
       ) {
-        this.syncColonyRoomCounts();
+        this.syncColonyInfrastructure();
         this.constructionRevision += 1;
       }
 
@@ -297,6 +297,11 @@ export const createMainScene = (
 
       if (event.code === 'KeyD') {
         this.setToolMode(ConstructionToolMode.Destroy);
+        return;
+      }
+
+      if (event.code === 'KeyE') {
+        this.setToolMode(ConstructionToolMode.Improve);
       }
     }
 
@@ -364,6 +369,41 @@ export const createMainScene = (
         return this.removeGalleryAtSelectedPosition();
       }
 
+      if (this.toolMode === ConstructionToolMode.Improve) {
+        const upgradeRequest =
+          this.constructionGridRenderer.getPieceUpgradeRequestAtPosition(
+            this.selectedPosition,
+          );
+
+        if (
+          upgradeRequest === undefined ||
+          !this.gameRuntime?.tryUpgradeRoom(
+            upgradeRequest.definitionId,
+            upgradeRequest.currentLevel,
+          )
+        ) {
+          return false;
+        }
+
+        const didUpgrade = this.constructionGridRenderer.tryUpgradePieceAtPosition(
+          this.selectedPosition,
+        );
+
+        if (!didUpgrade) {
+          return false;
+        }
+
+        return true;
+      }
+
+      const constructionCost = this.constructionGridRenderer.getConstructionPieceCost(
+        this.selectedPieceType,
+      );
+
+      if (!this.gameRuntime?.tryPurchaseConstruction(constructionCost)) {
+        return false;
+      }
+
       return this.constructionGridRenderer.placeConstructionPieceAtPosition(
         this.selectedPosition,
         this.selectedPieceType,
@@ -418,13 +458,14 @@ export const createMainScene = (
       );
     }
 
-    private syncColonyRoomCounts(): void {
+    private syncColonyInfrastructure(): void {
       if (!this.gameRuntime || !this.constructionGridRenderer) {
         return;
       }
 
-      this.gameRuntime.setColonyRoomCounts(
+      this.gameRuntime.setColonyInfrastructure(
         this.constructionGridRenderer.getColonyRoomCounts(),
+        this.constructionGridRenderer.getColonyRoomUpgradeTotals(),
       );
     }
 
@@ -477,6 +518,7 @@ export const createMainScene = (
         this.isFloatingMenuCollapsed,
         this.floatingMenuSlideProgress,
         this.antAnimationTimeMs,
+        this.gameRuntime?.getSnapshot().colony,
       );
     }
 

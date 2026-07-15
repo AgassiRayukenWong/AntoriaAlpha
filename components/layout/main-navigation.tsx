@@ -14,11 +14,20 @@ import type { GameRuntimeSnapshot } from '@/game/engine/game-runtime';
 import { GAME_RUNTIME_SNAPSHOT_EVENT } from '@/game/engine/runtime-snapshot-event';
 import { navigationLabels, siteLabels } from '@/lib/labels';
 
-type MetricIconName = 'capacity' | 'food' | 'larvae' | 'workers';
+type MetricIconName =
+  | 'capacity'
+  | 'experience'
+  | 'food'
+  | 'gold'
+  | 'larvae'
+  | 'level'
+  | 'workers';
 
 interface MetricDefinition {
   readonly icon: MetricIconName;
   readonly label: string;
+  readonly progressCurrent?: number;
+  readonly progressMax?: number;
   readonly tooltipDetail: string;
   readonly value: string;
 }
@@ -67,10 +76,32 @@ function MetricIcon({ name }: { readonly name: MetricIconName }) {
           <path d="M5 12h14" />
         </svg>
       );
+    case 'experience':
+      return (
+        <svg {...commonProps}>
+          <path d="M7 16.5 12 6l5 10.5" />
+          <path d="M8.8 13h6.4" />
+          <path d="M12 6v12" />
+        </svg>
+      );
+    case 'gold':
+      return (
+        <svg {...commonProps}>
+          <circle cx="12" cy="12" r="6.5" />
+          <path d="M9.5 12h5" />
+          <path d="M12 9.5v5" />
+        </svg>
+      );
     case 'larvae':
       return (
         <svg {...commonProps}>
           <path d="M7.5 14.5c0 1.9 1.6 3.5 4.5 3.5s4.5-1.6 4.5-3.5c0-1.4-0.9-2.3-2.4-3.2 1-0.7 1.6-1.5 1.6-2.8C15.7 6.6 14 5 12 5S8.3 6.6 8.3 8.5c0 1.3 0.6 2.1 1.6 2.8-1.5 0.9-2.4 1.8-2.4 3.2Z" />
+        </svg>
+      );
+    case 'level':
+      return (
+        <svg {...commonProps}>
+          <path d="M12 5 14 9l4.5.6-3.2 3.1.8 4.6-4.1-2.2-4.1 2.2.8-4.6L5.5 9.6 10 9z" />
         </svg>
       );
     case 'workers':
@@ -87,6 +118,26 @@ function MetricIcon({ name }: { readonly name: MetricIconName }) {
 function buildMetrics(snapshot: GameRuntimeSnapshot | null): readonly MetricDefinition[] {
   if (snapshot === null) {
     return [
+      {
+        icon: 'gold',
+        label: 'Gold',
+        tooltipDetail: 'Réserve disponible pour les améliorations',
+        value: '--',
+      },
+      {
+        icon: 'level',
+        label: 'Niveau colonie',
+        tooltipDetail: 'Niveau actuel de la colonie',
+        value: '--',
+      },
+      {
+        icon: 'experience',
+        label: 'Exp',
+        progressCurrent: 0,
+        progressMax: 1,
+        tooltipDetail: 'Naissance d’ouvrière : +1 exp',
+        value: '-- / --',
+      },
       {
         icon: 'food',
         label: 'Nourriture',
@@ -120,6 +171,26 @@ function buildMetrics(snapshot: GameRuntimeSnapshot | null): readonly MetricDefi
   const workersPerHour = colony.roomCounts.broodChamberCount * (3600 / 12);
 
   return [
+    {
+      icon: 'gold',
+      label: 'Gold',
+      tooltipDetail: 'Réserve disponible pour les améliorations',
+      value: `${colony.gold}`,
+    },
+    {
+      icon: 'level',
+      label: 'Niveau colonie',
+      tooltipDetail: 'Niveau actuel de la colonie',
+      value: `${colony.colonyLevel}`,
+    },
+    {
+      icon: 'experience',
+      label: 'Exp',
+      progressCurrent: colony.colonyExperienceProgress,
+      progressMax: colony.colonyExperienceToNextLevel,
+      tooltipDetail: `Naissance d’ouvrière : +1 exp • total ${colony.colonyExperience}`,
+      value: `${colony.colonyExperienceProgress} / ${colony.colonyExperienceToNextLevel}`,
+    },
     {
       icon: 'food',
       label: 'Nourriture',
@@ -252,7 +323,7 @@ export function MainNavigation() {
       <div className="main-navigation__metrics" aria-label="Métriques colonie">
         {metrics.map((metric) => (
           <div
-            className="main-navigation__metric"
+            className={`main-navigation__metric${metric.progressCurrent !== undefined ? ' main-navigation__metric--with-progress' : ''}`}
             key={metric.label}
             role="presentation"
             onMouseEnter={(event) => {
@@ -270,7 +341,29 @@ export function MainNavigation() {
               >
                 <MetricIcon name={metric.icon} />
               </span>
-              <span className="main-navigation__metric-value">{metric.value}</span>
+              <div className="main-navigation__metric-content">
+                <span className="main-navigation__metric-value">{metric.value}</span>
+                {metric.progressCurrent !== undefined &&
+                metric.progressMax !== undefined ? (
+                  <span
+                    className="main-navigation__metric-progress"
+                    aria-hidden="true"
+                  >
+                    <span
+                      className="main-navigation__metric-progress-fill"
+                      style={{
+                        width: `${Math.max(
+                          0,
+                          Math.min(
+                            100,
+                            (metric.progressCurrent / Math.max(1, metric.progressMax)) * 100,
+                          ),
+                        )}%`,
+                      }}
+                    />
+                  </span>
+                ) : null}
+              </div>
             </div>
           </div>
         ))}
