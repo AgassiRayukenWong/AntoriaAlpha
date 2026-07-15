@@ -97,6 +97,8 @@ export enum ConstructionPieceType {
 }
 
 const constructionGridPalette = {
+  antBody: 0x1f140d,
+  antHighlight: 0x8f6a3d,
   base: 0x100f0b,
   conduitBorder: 0x8f7a55,
   conduitFill: 0x242017,
@@ -346,6 +348,7 @@ export class ConstructionGridRenderer {
     gridScrollY = 0,
     isFloatingMenuCollapsed = false,
     floatingMenuSlideProgress = isFloatingMenuCollapsed ? 1 : 0,
+    antAnimationTimeMs = 0,
   ): void {
     const gridArea = this.createGridArea(width, height, gridScrollY);
     const viewportGridArea = this.createGridArea(width, height);
@@ -387,6 +390,7 @@ export class ConstructionGridRenderer {
     this.drawSelectedGridCell(gridArea, selectedPosition, selectedPieceType);
     this.drawGalleryPieces(gridArea, this.constructionGrid.pieces);
     this.drawQueenAnchor(gridArea);
+    this.drawAntTraffic(gridArea, antAnimationTimeMs);
     this.drawSelectedPiece(gridArea, selectedPosition);
     if (floatingMenuSlideProgress < 1) {
       this.drawFloatingMenuPanel(viewportGridArea, floatingMenuRect);
@@ -2120,6 +2124,305 @@ export class ConstructionGridRenderer {
     this.drawNetworkStatusHighlights(gridArea, pieces);
     this.drawRoomEntranceMarkers(gridArea, pieces);
     this.drawRoomEntranceCounters(gridArea, pieces);
+  }
+
+  private drawAntTraffic(gridArea: GridArea, animationTimeMs: number): void {
+    const route = this.getAntTrafficRoute(gridArea);
+
+    if (route.length < 2) {
+      return;
+    }
+
+    const totalLength = this.getRouteLength(route);
+
+    if (totalLength <= 0) {
+      return;
+    }
+
+    const antCount = Math.min(14, Math.max(6, route.length));
+    const antSpeed = gridArea.cellSize * 0.0014;
+
+    for (let antIndex = 0; antIndex < antCount; antIndex += 1) {
+      const offset = (totalLength / antCount) * antIndex;
+      const distance = (animationTimeMs * antSpeed + offset) % totalLength;
+      const position = this.getPointAlongRoute(route, distance);
+
+      if (position === undefined) {
+        continue;
+      }
+
+      this.drawAntSprite(gridArea, position.x, position.y, position.angle, antIndex);
+    }
+  }
+
+  private getAntTrafficRoute(
+    gridArea: GridArea,
+  ): readonly { readonly x: number; readonly y: number }[] {
+    const queenChamber = this.findQueenChamber();
+
+    if (queenChamber === undefined) {
+      return [];
+    }
+
+    const connectedPieceIds = this.getQueenNetworkPieceIds();
+    const connectedPieces = this.constructionGrid.pieces.filter((piece) =>
+      connectedPieceIds.has(piece.id),
+    );
+
+    if (connectedPieces.length === 0) {
+      return [];
+    }
+
+    const roomPieces = connectedPieces
+      .filter((piece) => this.isRoomPiece(piece))
+      .sort((firstPiece, secondPiece) => {
+        if (firstPiece.id === queenChamber.id) {
+          return -1;
+        }
+
+        if (secondPiece.id === queenChamber.id) {
+          return 1;
+        }
+
+        return (
+          firstPiece.position.row - secondPiece.position.row ||
+          firstPiece.position.column - secondPiece.position.column
+        );
+      });
+    const conduitPiece = connectedPieces.find((piece) =>
+      this.isPieceTouchingConduit(piece),
+    );
+    const pieceRouteIds: string[] = [];
+    let currentPieceId = queenChamber.id;
+
+    pieceRouteIds.push(currentPieceId);
+
+    roomPieces.forEach((piece) => {
+      if (piece.id === currentPieceId) {
+        return;
+      }
+
+      this.appendPiecePath(pieceRouteIds, connectedPieces, currentPieceId, piece.id);
+      currentPieceId = piece.id;
+    });
+
+    if (conduitPiece !== undefined && conduitPiece.id !== currentPieceId) {
+      this.appendPiecePath(
+        pieceRouteIds,
+        connectedPieces,
+        currentPieceId,
+        conduitPiece.id,
+      );
+      currentPieceId = conduitPiece.id;
+    }
+
+    const routePoints = pieceRouteIds
+      .map((pieceId) => connectedPieces.find((piece) => piece.id === pieceId))
+      .filter((piece): piece is GalleryPiece => piece !== undefined)
+      .map((piece) => {
+        const rect = this.getGalleryRect(gridArea, piece);
+
+        return {
+          x: rect.x + rect.width / 2,
+          y: rect.y + rect.height / 2,
+        };
+      });
+
+    if (routePoints.length === 0) {
+      return [];
+    }
+
+    if (conduitPiece !== undefined) {
+      const conduitCenter = this.getCellCenter(
+        gridArea,
+        constructionGridLayout.conduit.position,
+      );
+      const surfaceExitPoint = {
+        x: conduitCenter.x,
+        y: gridArea.y - gridArea.cellSize * 1.15,
+      };
+
+      routePoints.push(conduitCenter, surfaceExitPoint, conduitCenter);
+    }
+
+    const returnPoints = [...routePoints].slice(0, -1).reverse();
+
+    return [...routePoints, ...returnPoints];
+  }
+
+  private appendPiecePath(
+    pieceRouteIds: string[],
+    connectedPieces: readonly GalleryPiece[],
+    startPieceId: string,
+    targetPieceId: string,
+  ): void {
+    const path = this.findShortestPiecePath(
+      connectedPieces,
+      startPieceId,
+      targetPieceId,
+    );
+
+    path.slice(1).forEach((pieceId) => {
+      pieceRouteIds.push(pieceId);
+    });
+  }
+
+  private findShortestPiecePath(
+    connectedPieces: readonly GalleryPiece[],
+    startPieceId: string,
+    targetPieceId: string,
+  ): readonly string[] {
+    if (startPieceId === targetPieceId) {
+      return [startPieceId];
+    }
+
+    const queue: string[] = [startPieceId];
+    const previousPieceIds = new Map<string, string | undefined>([
+      [startPieceId, undefined],
+    ]);
+
+    while (queue.length > 0) {
+      const currentPieceId = queue.shift();
+
+      if (currentPieceId === undefined) {
+        break;
+      }
+
+      if (currentPieceId === targetPieceId) {
+        break;
+      }
+
+      const currentPiece = connectedPieces.find((piece) => piece.id === currentPieceId);
+
+      if (currentPiece === undefined) {
+        continue;
+      }
+
+      connectedPieces.forEach((candidate) => {
+        if (
+          candidate.id === currentPiece.id ||
+          previousPieceIds.has(candidate.id) ||
+          !areGalleryPiecesConnected(currentPiece, candidate)
+        ) {
+          return;
+        }
+
+        previousPieceIds.set(candidate.id, currentPiece.id);
+        queue.push(candidate.id);
+      });
+    }
+
+    if (!previousPieceIds.has(targetPieceId)) {
+      return [startPieceId];
+    }
+
+    const reversedPath: string[] = [];
+    let currentPieceId: string | undefined = targetPieceId;
+
+    while (currentPieceId !== undefined) {
+      reversedPath.push(currentPieceId);
+      currentPieceId = previousPieceIds.get(currentPieceId);
+    }
+
+    return reversedPath.reverse();
+  }
+
+  private isPieceTouchingConduit(piece: GalleryPiece): boolean {
+    return getGalleryPieceOccupiedPositions(piece).some(
+      (position) => this.getConduitConnectionDirection(position) !== undefined,
+    );
+  }
+
+  private getRouteLength(
+    route: readonly { readonly x: number; readonly y: number }[],
+  ): number {
+    return route.slice(1).reduce((totalLength, point, index) => {
+      const previousPoint = route[index];
+
+      return totalLength + this.Phaser.Math.Distance.Between(
+        previousPoint.x,
+        previousPoint.y,
+        point.x,
+        point.y,
+      );
+    }, 0);
+  }
+
+  private getPointAlongRoute(
+    route: readonly { readonly x: number; readonly y: number }[],
+    distance: number,
+  ):
+    | {
+        readonly angle: number;
+        readonly x: number;
+        readonly y: number;
+      }
+    | undefined {
+    let remainingDistance = distance;
+
+    for (let index = 1; index < route.length; index += 1) {
+      const previousPoint = route[index - 1];
+      const point = route[index];
+      const segmentLength = this.Phaser.Math.Distance.Between(
+        previousPoint.x,
+        previousPoint.y,
+        point.x,
+        point.y,
+      );
+
+      if (segmentLength === 0) {
+        continue;
+      }
+
+      if (remainingDistance <= segmentLength) {
+        const progress = remainingDistance / segmentLength;
+
+        return {
+          angle: Math.atan2(point.y - previousPoint.y, point.x - previousPoint.x),
+          x: this.Phaser.Math.Linear(previousPoint.x, point.x, progress),
+          y: this.Phaser.Math.Linear(previousPoint.y, point.y, progress),
+        };
+      }
+
+      remainingDistance -= segmentLength;
+    }
+
+    return undefined;
+  }
+
+  private drawAntSprite(
+    gridArea: GridArea,
+    x: number,
+    y: number,
+    angle: number,
+    antIndex: number,
+  ): void {
+    const bodyRadius = Math.max(1.8, gridArea.cellSize * 0.055);
+    const headRadius = bodyRadius * 0.72;
+    const abdomenRadius = bodyRadius * 0.95;
+    const spacing = bodyRadius * 1.55;
+    const wingX = Math.cos(angle);
+    const wingY = Math.sin(angle);
+    const bob = Math.sin((x + y + antIndex * 13) * 0.08) * bodyRadius * 0.16;
+    const centerX = x;
+    const centerY = y + bob;
+
+    const abdomenX = centerX - wingX * spacing;
+    const abdomenY = centerY - wingY * spacing;
+    const headX = centerX + wingX * spacing;
+    const headY = centerY + wingY * spacing;
+
+    this.graphics.fillStyle(constructionGridPalette.antBody, 0.95);
+    this.graphics.fillCircle(abdomenX, abdomenY, abdomenRadius);
+    this.graphics.fillCircle(centerX, centerY, bodyRadius);
+    this.graphics.fillCircle(headX, headY, headRadius);
+
+    this.graphics.fillStyle(constructionGridPalette.antHighlight, 0.26);
+    this.graphics.fillCircle(
+      centerX + wingX * bodyRadius * 0.2,
+      centerY - wingY * bodyRadius * 0.2,
+      bodyRadius * 0.42,
+    );
   }
 
   public destroy(): void {

@@ -17,6 +17,7 @@ export const createMainScene = (
   Phaser: typeof PhaserType,
 ): typeof PhaserType.Scene => {
   class MainScene extends Phaser.Scene {
+    private antAnimationTimeMs = 0;
     private constructionGridRenderer?: ConstructionGridRenderer;
     private browserRuntimeLifecycle?: BrowserRuntimeLifecycle;
     private constructionRevision = 0;
@@ -27,6 +28,7 @@ export const createMainScene = (
     private pointer?: ConstructionGridPointer;
     private renderedHeight = 0;
     private renderedConstructionRevision = 0;
+    private renderedAntAnimationFrame = -1;
     private renderedGridScrollY = 0;
     private renderedFloatingMenuSlideProgress = 0;
     private renderedIsFloatingMenuCollapsed = false;
@@ -127,10 +129,14 @@ export const createMainScene = (
 
     public update(_time: number, deltaTimeMs: number): void {
       this.gameRuntime?.update(deltaTimeMs);
+      this.antAnimationTimeMs += deltaTimeMs;
 
       if (this.updateFloatingMenuTransition(deltaTimeMs)) {
         this.drawScene();
+        return;
       }
+
+      this.drawScene();
     }
 
     private handlePointerMove(pointer: PhaserType.Input.Pointer): void {
@@ -408,10 +414,12 @@ export const createMainScene = (
 
       const width = this.scale.width;
       const height = this.scale.height;
+      const antAnimationFrame = Math.floor(this.antAnimationTimeMs / 40);
 
       if (
         width === this.renderedWidth &&
         height === this.renderedHeight &&
+        antAnimationFrame === this.renderedAntAnimationFrame &&
         this.constructionRevision === this.renderedConstructionRevision &&
         this.gridScrollY === this.renderedGridScrollY &&
         this.floatingMenuSlideProgress ===
@@ -428,6 +436,7 @@ export const createMainScene = (
 
       this.renderedWidth = width;
       this.renderedHeight = height;
+      this.renderedAntAnimationFrame = antAnimationFrame;
       this.renderedConstructionRevision = this.constructionRevision;
       this.renderedGridScrollY = this.gridScrollY;
       this.renderedFloatingMenuSlideProgress = this.floatingMenuSlideProgress;
@@ -446,6 +455,7 @@ export const createMainScene = (
         this.gridScrollY,
         this.isFloatingMenuCollapsed,
         this.floatingMenuSlideProgress,
+        this.antAnimationTimeMs,
       );
     }
 
