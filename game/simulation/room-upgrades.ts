@@ -1,4 +1,5 @@
 export type UpgradeableRoomDefinitionId =
+  | 'barracks'
   | 'brood-chamber'
   | 'fungus-farm'
   | 'queen-chamber'
@@ -15,6 +16,7 @@ export interface RoomUpgradeRequirement {
 const ROOM_MAX_LEVEL = 5;
 
 const upgradeableRoomDefinitionIds = new Set<UpgradeableRoomDefinitionId>([
+  'barracks',
   'brood-chamber',
   'fungus-farm',
   'queen-chamber',
@@ -41,6 +43,14 @@ export const getRoomUpgradeRequirement = (
   const nextLevel = currentLevel + 1;
 
   switch (definitionId) {
+    case 'barracks':
+      return {
+        costGold: 13 + nextLevel * 7,
+        currentLevel,
+        maxLevel: ROOM_MAX_LEVEL,
+        nextLevel,
+        requiredColonyLevel: Math.max(1, nextLevel - 1),
+      };
     case 'queen-chamber':
       return {
         costGold: 14 + nextLevel * 8,

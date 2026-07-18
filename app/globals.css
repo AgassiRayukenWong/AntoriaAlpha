@@ -191,6 +191,18 @@ a {
   text-align: left;
 }
 
+.main-navigation__metric-value--success {
+  color: color-mix(in srgb, var(--accent) 88%, white);
+}
+
+.main-navigation__metric-value--warning {
+  color: #f0c76a;
+}
+
+.main-navigation__metric-value--danger {
+  color: #d46a56;
+}
+
 .main-navigation__metric-progress {
   display: block;
   width: 100%;
@@ -297,11 +309,159 @@ a {
     radial-gradient(circle at center, transparent 42%, rgb(0 0 0 / 0.28) 100%);
 }
 
+.game-viewport__round-panel {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 7;
+  display: grid;
+  width: min(100%, 21rem);
+  gap: 0.75rem;
+  border: 0.0625rem solid
+    color-mix(in srgb, var(--color-stone-500) 32%, transparent);
+  border-radius: 0.95rem;
+  background:
+    linear-gradient(180deg, rgb(231 231 223 / 0.04), rgb(0 0 0 / 0.12)),
+    color-mix(in srgb, var(--color-earth-900) 96%, transparent);
+  padding: 0.95rem 1rem;
+  box-shadow:
+    0 0.8rem 2rem rgb(0 0 0 / 0.26),
+    inset 0 0 0 0.0625rem rgb(231 231 223 / 0.03);
+  backdrop-filter: blur(0.28rem);
+}
+
+.game-viewport__round-panel-header {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.game-viewport__round-panel-eyebrow {
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.game-viewport__round-panel-title {
+  color: var(--color-stone-100);
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.game-viewport__round-panel-list {
+  display: grid;
+  gap: 0.48rem;
+}
+
+.game-viewport__round-panel-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.9rem;
+  border: 0.0625rem solid
+    color-mix(in srgb, var(--color-stone-500) 22%, transparent);
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--surface) 52%, transparent);
+  padding: 0.7rem 0.8rem;
+}
+
+.game-viewport__round-panel-item-text {
+  color: var(--color-stone-100);
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.game-viewport__round-panel-item-value {
+  color: var(--accent);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
 .game-viewport canvas {
   display: block;
   width: 100%;
   height: 100%;
   max-width: 100%;
+}
+
+.game-viewport__game-over {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-items: center;
+  padding: clamp(1rem, 3vw, 2rem);
+  background:
+    linear-gradient(180deg, rgb(0 0 0 / 0.42), rgb(0 0 0 / 0.62)),
+    radial-gradient(circle at center, rgb(23 19 15 / 0.18), rgb(0 0 0 / 0.5));
+  backdrop-filter: blur(0.22rem);
+}
+
+.game-viewport__game-over-panel {
+  display: grid;
+  width: min(100%, 24rem);
+  gap: 1rem;
+  border: 0.0625rem solid
+    color-mix(in srgb, var(--color-stone-500) 36%, transparent);
+  border-radius: 1rem;
+  background:
+    linear-gradient(180deg, rgb(231 231 223 / 0.04), rgb(0 0 0 / 0.14)),
+    color-mix(in srgb, var(--color-earth-900) 94%, transparent);
+  padding: 1.25rem;
+  box-shadow:
+    0 1.25rem 3rem rgb(0 0 0 / 0.34),
+    inset 0 0 0 0.0625rem rgb(231 231 223 / 0.04);
+}
+
+.game-viewport__game-over-eyebrow {
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.game-viewport__game-over-title {
+  margin: 0;
+  color: var(--color-stone-100);
+  font-size: clamp(1.5rem, 2.3vw, 2rem);
+  font-weight: 800;
+  line-height: 1.05;
+}
+
+.game-viewport__game-over-stats {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.game-viewport__game-over-stat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 0.0625rem solid
+    color-mix(in srgb, var(--color-stone-500) 28%, transparent);
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--surface) 52%, transparent);
+  padding: 0.9rem 1rem;
+}
+
+.game-viewport__game-over-stat-label {
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.game-viewport__game-over-stat-value {
+  color: var(--color-stone-100);
+  font-size: 1.1rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
 }
 
 @media (min-width: 48rem) {

@@ -157,7 +157,10 @@ export const createMainScene = (
     }
 
     private handlePointerDown(pointer: PhaserType.Input.Pointer): void {
-      if (!this.constructionGridRenderer) {
+      if (
+        !this.constructionGridRenderer ||
+        this.gameRuntime?.getSnapshot().isGameOver
+      ) {
         return;
       }
 

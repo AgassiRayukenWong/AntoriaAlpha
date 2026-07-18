@@ -10,6 +10,7 @@ export interface ColonyRoomCounts {
 }
 
 export interface ColonyRoomUpgradeTotals {
+  readonly barracksLevelTotal: number;
   readonly broodChamberLevelTotal: number;
   readonly fungusFarmLevelTotal: number;
   readonly queenChamberLevelTotal: number;
@@ -66,6 +67,7 @@ const EMPTY_ROOM_COUNTS: ColonyRoomCounts = {
 };
 
 const EMPTY_ROOM_UPGRADE_TOTALS: ColonyRoomUpgradeTotals = {
+  barracksLevelTotal: 0,
   broodChamberLevelTotal: 0,
   fungusFarmLevelTotal: 0,
   queenChamberLevelTotal: 0,
@@ -180,6 +182,26 @@ export class ColonyEconomySystem implements SimulationSystem {
     this.state.gold -= amount;
 
     return true;
+  }
+
+  public addGold(amount: number): void {
+    if (amount <= 0) {
+      return;
+    }
+
+    this.state.gold += amount;
+  }
+
+  public removeWorkers(amount: number): number {
+    if (amount <= 0) {
+      return 0;
+    }
+
+    const removedWorkers = Math.min(this.state.workers, Math.floor(amount));
+
+    this.state.workers -= removedWorkers;
+
+    return removedWorkers;
   }
 
   public getSnapshot(): ColonyEconomySnapshot {

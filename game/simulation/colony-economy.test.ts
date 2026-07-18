@@ -4,11 +4,13 @@ import { ColonyEconomySystem } from '@/game/simulation/colony-economy';
 import { getRoomUpgradeRequirement } from '@/game/simulation/room-upgrades';
 
 const createUpgradeTotals = (overrides: Partial<{
+  barracksLevelTotal: number;
   broodChamberLevelTotal: number;
   fungusFarmLevelTotal: number;
   queenChamberLevelTotal: number;
   storageLevelTotal: number;
 }> = {}) => ({
+  barracksLevelTotal: 0,
   broodChamberLevelTotal: 0,
   fungusFarmLevelTotal: 0,
   queenChamberLevelTotal: 0,
@@ -146,6 +148,20 @@ describe('ColonyEconomySystem', () => {
 
     expect(system.trySpendGold(500)).toBe(false);
     expect(system.getSnapshot().gold).toBe(80);
+  });
+
+  it('removes workers after combat losses', () => {
+    const system = new ColonyEconomySystem({ initialWorkers: 6 });
+
+    expect(system.removeWorkers(2)).toBe(2);
+    expect(system.getSnapshot().workers).toBe(4);
+  });
+
+  it('does not remove more workers than the colony currently has', () => {
+    const system = new ColonyEconomySystem({ initialWorkers: 3 });
+
+    expect(system.removeWorkers(99)).toBe(3);
+    expect(system.getSnapshot().workers).toBe(0);
   });
 
   it('exposes current colony experience progress toward next level', () => {

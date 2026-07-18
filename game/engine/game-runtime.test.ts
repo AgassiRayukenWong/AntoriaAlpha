@@ -135,6 +135,7 @@ describe('GameRuntime', () => {
           storageCount: 0,
         },
         roomUpgradeTotals: {
+          barracksLevelTotal: 0,
           broodChamberLevelTotal: 0,
           fungusFarmLevelTotal: 0,
           queenChamberLevelTotal: 0,
@@ -142,6 +143,7 @@ describe('GameRuntime', () => {
         },
         workers: 4,
       },
+      isGameOver: false,
       isPaused: true,
       maximumDeltaTimeMs: 250,
       simulation: {
@@ -153,10 +155,27 @@ describe('GameRuntime', () => {
       surfaceDefense: {
         activeThreat: null,
         availableSoldierCount: 0,
+        colonyIntegrity: 3,
+        colonyIntegrityMax: 3,
+        currentRoundEnemies: [
+          {
+            hitPoints: 30,
+            kind: 'cockroach',
+            label: 'Blatte',
+            level: 1,
+            quantity: 1,
+          },
+        ],
         defeatedThreatCount: 0,
         engagedSoldierCount: 0,
         escapedThreatCount: 0,
+        isColonyDefeated: false,
+        nextThreatLevelAtSurvivalTimeMs: 30000,
+        rewardFeedback: null,
+        score: 0,
+        soldierCapacityMax: 0,
         survivalTimeMs: 200,
+        threatLevel: 1,
         wave: 1,
       },
     });
@@ -237,5 +256,81 @@ describe('GameRuntime', () => {
 
     expect(gameRuntime.tryPurchaseConstruction(999)).toBe(false);
     expect(gameRuntime.getSnapshot().colony.gold).toBe(80);
+  });
+
+  it('earns gold when surface threats are defeated', () => {
+    const gameRuntime = new GameRuntime({ simulationTickDurationMs: 250 });
+
+    gameRuntime.setColonyInfrastructure(
+      {
+        barracksCount: 3,
+        broodChamberCount: 0,
+        fungusFarmCount: 0,
+        queenChamberCount: 1,
+        storageCount: 0,
+      },
+      {
+        barracksLevelTotal: 3,
+        broodChamberLevelTotal: 0,
+        fungusFarmLevelTotal: 0,
+        queenChamberLevelTotal: 1,
+        storageLevelTotal: 0,
+      },
+    );
+
+    for (let index = 0; index < 120; index += 1) {
+      gameRuntime.update(250);
+    }
+
+    expect(gameRuntime.getSnapshot().colony.gold).toBeGreaterThan(80);
+  });
+
+  it('removes workers when soldiers die during a surface fight', () => {
+    const gameRuntime = new GameRuntime({ simulationTickDurationMs: 250 });
+
+    gameRuntime.setColonyInfrastructure(
+      {
+        barracksCount: 3,
+        broodChamberCount: 0,
+        fungusFarmCount: 0,
+        queenChamberCount: 1,
+        storageCount: 0,
+      },
+      {
+        barracksLevelTotal: 3,
+        broodChamberLevelTotal: 0,
+        fungusFarmLevelTotal: 0,
+        queenChamberLevelTotal: 1,
+        storageLevelTotal: 0,
+      },
+    );
+
+    const initialWorkers = gameRuntime.getSnapshot().colony.workers;
+
+    for (let index = 0; index < 120; index += 1) {
+      gameRuntime.update(250);
+    }
+
+    expect(gameRuntime.getSnapshot().colony.workers).toBeLessThan(initialWorkers);
+  });
+
+  it('ends the run when too many threats break through the surface defense', () => {
+    const gameRuntime = new GameRuntime({ simulationTickDurationMs: 250 });
+
+    for (let index = 0; index < 1_500; index += 1) {
+      gameRuntime.update(250);
+
+      if (gameRuntime.getSnapshot().isGameOver) {
+        break;
+      }
+    }
+
+    const snapshot = gameRuntime.getSnapshot();
+
+    expect(snapshot.isGameOver).toBe(true);
+    expect(snapshot.isPaused).toBe(true);
+    expect(snapshot.surfaceDefense.colonyIntegrity).toBe(0);
+    expect(snapshot.surfaceDefense.colonyIntegrityMax).toBe(3);
+    expect(snapshot.surfaceDefense.isColonyDefeated).toBe(true);
   });
 });

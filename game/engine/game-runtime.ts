@@ -24,6 +24,7 @@ import {
 
 export interface GameRuntimeSnapshot {
   readonly colony: ColonyEconomySnapshot;
+  readonly isGameOver: boolean;
   readonly isPaused: boolean;
   readonly maximumDeltaTimeMs: number;
   readonly simulation: GameClockSnapshot;
@@ -91,7 +92,7 @@ export class GameRuntime {
         tickDurationMs,
         tickIndex,
       });
-      this.surfaceDefenseSystem.update(
+      const surfaceDefenseResult = this.surfaceDefenseSystem.update(
         {
           simulationTimeMs: tickIndex * tickDurationMs,
           tickDurationMs,
@@ -99,6 +100,21 @@ export class GameRuntime {
         },
         this.colonyEconomySystem.getSnapshot(),
       );
+
+      if (surfaceDefenseResult.earnedGold > 0) {
+        this.colonyEconomySystem.addGold(surfaceDefenseResult.earnedGold);
+      }
+
+      if (surfaceDefenseResult.lostWorkers > 0) {
+        this.colonyEconomySystem.removeWorkers(surfaceDefenseResult.lostWorkers);
+      }
+    }
+
+    if (
+      this.surfaceDefenseSystem.getSnapshot(this.colonyEconomySystem.getSnapshot())
+        .isColonyDefeated
+    ) {
+      this.isPaused = true;
     }
 
     this.notifySnapshotListeners();
@@ -131,6 +147,9 @@ export class GameRuntime {
   public getSnapshot(): GameRuntimeSnapshot {
     return {
       colony: this.colonyEconomySystem.getSnapshot(),
+      isGameOver: this.surfaceDefenseSystem.getSnapshot(
+        this.colonyEconomySystem.getSnapshot(),
+      ).isColonyDefeated,
       isPaused: this.isPaused,
       maximumDeltaTimeMs: this.maximumDeltaTimeMs,
       simulation: this.simulationEngine.getSnapshot(),
@@ -180,6 +199,7 @@ export class GameRuntime {
 
   public setColonyRoomCounts(roomCounts: ColonyRoomCounts): void {
     this.colonyEconomySystem.setInfrastructure(roomCounts, {
+      barracksLevelTotal: roomCounts.barracksCount,
       broodChamberLevelTotal: roomCounts.broodChamberCount,
       fungusFarmLevelTotal: roomCounts.fungusFarmCount,
       queenChamberLevelTotal: roomCounts.queenChamberCount,

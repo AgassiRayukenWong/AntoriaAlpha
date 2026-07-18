@@ -15,15 +15,20 @@ import { GAME_RUNTIME_SNAPSHOT_EVENT } from '@/game/engine/runtime-snapshot-even
 import { navigationLabels, siteLabels } from '@/lib/labels';
 
 type MetricIconName =
+  | 'army'
   | 'capacity'
   | 'experience'
   | 'food'
   | 'gold'
+  | 'integrity'
   | 'larvae'
   | 'level'
+  | 'survival'
+  | 'threat'
   | 'workers';
 
 interface MetricDefinition {
+  readonly emphasis?: 'danger' | 'success' | 'warning';
   readonly icon: MetricIconName;
   readonly label: string;
   readonly progressCurrent?: number;
@@ -49,6 +54,14 @@ const hourlyFormatter = new Intl.NumberFormat('fr-FR', {
   maximumFractionDigits: 0,
 });
 
+function formatSurvivalTime(survivalTimeMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(survivalTimeMs / 1_000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
 function MetricIcon({ name }: { readonly name: MetricIconName }) {
   const commonProps = {
     className: 'main-navigation__metric-icon-svg',
@@ -61,6 +74,14 @@ function MetricIcon({ name }: { readonly name: MetricIconName }) {
   };
 
   switch (name) {
+    case 'army':
+      return (
+        <svg {...commonProps}>
+          <path d="M7.2 17.2 12 6l4.8 11.2" />
+          <path d="M9.2 12.2h5.6" />
+          <path d="M12 6v12" />
+        </svg>
+      );
     case 'food':
       return (
         <svg {...commonProps}>
@@ -92,6 +113,12 @@ function MetricIcon({ name }: { readonly name: MetricIconName }) {
           <path d="M12 9.5v5" />
         </svg>
       );
+    case 'integrity':
+      return (
+        <svg {...commonProps}>
+          <path d="M12 18s-4.8-2.8-4.8-6.8V7.8L12 6l4.8 1.8v3.4c0 4-4.8 6.8-4.8 6.8Z" />
+        </svg>
+      );
     case 'larvae':
       return (
         <svg {...commonProps}>
@@ -102,6 +129,21 @@ function MetricIcon({ name }: { readonly name: MetricIconName }) {
       return (
         <svg {...commonProps}>
           <path d="M12 5 14 9l4.5.6-3.2 3.1.8 4.6-4.1-2.2-4.1 2.2.8-4.6L5.5 9.6 10 9z" />
+        </svg>
+      );
+    case 'survival':
+      return (
+        <svg {...commonProps}>
+          <circle cx="12" cy="12" r="6.5" />
+          <path d="M12 8.5v4.1l2.6 1.7" />
+        </svg>
+      );
+    case 'threat':
+      return (
+        <svg {...commonProps}>
+          <path d="M12 5.8 18.2 17H5.8L12 5.8Z" />
+          <path d="M12 9.3v3.8" />
+          <circle cx="12" cy="15.1" r="0.65" fill="currentColor" stroke="none" />
         </svg>
       );
     case 'workers':
@@ -139,6 +181,30 @@ function buildMetrics(snapshot: GameRuntimeSnapshot | null): readonly MetricDefi
         value: '-- / --',
       },
       {
+        icon: 'threat',
+        label: 'Menace',
+        tooltipDetail: 'Niveau de pression actuel en surface',
+        value: '--',
+      },
+      {
+        icon: 'integrity',
+        label: 'Vies',
+        tooltipDetail: 'Chaque insecte qui traverse retire 1 vie',
+        value: '-- / --',
+      },
+      {
+        icon: 'army',
+        label: 'Armée',
+        tooltipDetail: 'Soldats engagés : -- • disponibles : -- • capacité : --',
+        value: '-- / -- / --',
+      },
+      {
+        icon: 'survival',
+        label: 'Survie',
+        tooltipDetail: 'Temps tenu depuis le début',
+        value: '--:--',
+      },
+      {
         icon: 'food',
         label: 'Nourriture',
         tooltipDetail: 'Génération : -- /h',
@@ -165,10 +231,20 @@ function buildMetrics(snapshot: GameRuntimeSnapshot | null): readonly MetricDefi
     ] as const;
   }
 
-  const { colony } = snapshot;
+  const { colony, surfaceDefense } = snapshot;
   const foodPerHour = colony.roomCounts.fungusFarmCount * 0.8 * 3600;
   const larvaePerHour = colony.roomCounts.queenChamberCount * (3600 / 10);
   const workersPerHour = colony.roomCounts.broodChamberCount * (3600 / 12);
+  const availableSoldiers = Math.max(
+    0,
+    surfaceDefense.availableSoldierCount - surfaceDefense.engagedSoldierCount,
+  );
+  const armyEmphasis =
+    surfaceDefense.engagedSoldierCount > 0 && availableSoldiers === 0
+      ? 'danger'
+      : surfaceDefense.engagedSoldierCount > 0
+        ? 'warning'
+        : 'success';
 
   return [
     {
@@ -190,6 +266,31 @@ function buildMetrics(snapshot: GameRuntimeSnapshot | null): readonly MetricDefi
       progressMax: colony.colonyExperienceToNextLevel,
       tooltipDetail: `Naissance d’ouvrière : +1 exp • total ${colony.colonyExperience}`,
       value: `${colony.colonyExperienceProgress} / ${colony.colonyExperienceToNextLevel}`,
+    },
+    {
+      icon: 'threat',
+      label: 'Menace',
+      tooltipDetail: `Palier suivant à ${formatSurvivalTime(surfaceDefense.nextThreatLevelAtSurvivalTimeMs)}`,
+      value: `${surfaceDefense.threatLevel}`,
+    },
+    {
+      icon: 'integrity',
+      label: 'Vies',
+      tooltipDetail: `${surfaceDefense.escapedThreatCount} percée${surfaceDefense.escapedThreatCount > 1 ? 's' : ''} ennemie${surfaceDefense.escapedThreatCount > 1 ? 's' : ''} • 1 vie perdue par percée`,
+      value: `${surfaceDefense.colonyIntegrity} / ${surfaceDefense.colonyIntegrityMax}`,
+    },
+    {
+      emphasis: armyEmphasis,
+      icon: 'army',
+      label: 'ArmÃ©e',
+      tooltipDetail: `Soldats engagÃ©s : ${surfaceDefense.engagedSoldierCount} â€¢ disponibles : ${availableSoldiers} â€¢ capacitÃ© : ${surfaceDefense.soldierCapacityMax}`,
+      value: `${surfaceDefense.engagedSoldierCount} / ${availableSoldiers} / ${surfaceDefense.soldierCapacityMax}`,
+    },
+    {
+      icon: 'survival',
+      label: 'Survie',
+      tooltipDetail: `Menaces tuées : ${surfaceDefense.defeatedThreatCount} • passées : ${surfaceDefense.escapedThreatCount}`,
+      value: formatSurvivalTime(surfaceDefense.survivalTimeMs),
     },
     {
       icon: 'food',
@@ -264,9 +365,10 @@ export function MainNavigation() {
       viewportHeight;
     const hasRoomAbove =
       hoveredMetric.anchorTop - offset - tooltipBounds.height - margin >= 0;
-    const top = hasRoomBelow || !hasRoomAbove
-      ? hoveredMetric.anchorBottom + offset
-      : hoveredMetric.anchorTop - tooltipBounds.height - offset;
+    const top =
+      hasRoomBelow || !hasRoomAbove
+        ? hoveredMetric.anchorBottom + offset
+        : hoveredMetric.anchorTop - tooltipBounds.height - offset;
 
     setTooltipPosition({
       left: clampedLeft,
@@ -342,7 +444,11 @@ export function MainNavigation() {
                 <MetricIcon name={metric.icon} />
               </span>
               <div className="main-navigation__metric-content">
-                <span className="main-navigation__metric-value">{metric.value}</span>
+                <span
+                  className={`main-navigation__metric-value${metric.emphasis !== undefined ? ` main-navigation__metric-value--${metric.emphasis}` : ''}`}
+                >
+                  {metric.value}
+                </span>
                 {metric.progressCurrent !== undefined &&
                 metric.progressMax !== undefined ? (
                   <span

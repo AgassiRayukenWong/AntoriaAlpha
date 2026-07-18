@@ -521,6 +521,7 @@ export class ConstructionGridRenderer {
 
   public getColonyRoomUpgradeTotals(): ColonyRoomUpgradeTotals {
     return {
+      barracksLevelTotal: this.getTotalLevelForDefinitionId('barracks'),
       broodChamberLevelTotal: this.getTotalLevelForDefinitionId('brood-chamber'),
       fungusFarmLevelTotal: this.getTotalLevelForDefinitionId('fungus-farm'),
       queenChamberLevelTotal: this.getTotalLevelForDefinitionId('queen-chamber'),
@@ -2398,11 +2399,36 @@ export class ConstructionGridRenderer {
       return baseLabel;
     }
 
+    const localMetricDetail = this.getPieceLocalMetricDetail(piece);
+
     if (requirement === undefined) {
-      return `${baseLabel}\nNiveau maximum`;
+      return localMetricDetail === null
+        ? `${baseLabel}\nNiveau maximum`
+        : `${baseLabel}\n${localMetricDetail}\nNiveau maximum`;
     }
 
-    return `${baseLabel}\nAm\u00e9lioration : ${requirement.costGold} gold - colonie niv. ${requirement.requiredColonyLevel}`;
+    return localMetricDetail === null
+      ? `${baseLabel}\nAm\u00e9lioration : ${requirement.costGold} gold - colonie niv. ${requirement.requiredColonyLevel}`
+      : `${baseLabel}\n${localMetricDetail}\nAm\u00e9lioration : ${requirement.costGold} gold - colonie niv. ${requirement.requiredColonyLevel}`;
+  }
+
+  private getPieceLocalMetricDetail(piece: GalleryPiece): string | null {
+    const level = this.getPieceLevel(piece);
+
+    switch (piece.definitionId) {
+      case 'barracks':
+        return `Local : +${level * 4} armée max`;
+      case 'brood-chamber':
+        return `Local : +${level * 300} ouvrières/h`;
+      case 'queen-chamber':
+        return `Local : +${level * 360} larves/h`;
+      case 'storage':
+        return `Local : +${level * 40} capacité`;
+      case 'fungus-farm':
+        return `Local : +${(level * 2880).toFixed(0)} nourriture/h`;
+      default:
+        return null;
+    }
   }
 
   private canUpgradePieceAtPosition(position: ConstructionGridPosition): boolean {
@@ -2459,6 +2485,7 @@ export class ConstructionGridRenderer {
     this.drawRoomEntranceMarkers(gridArea, pieces);
     this.drawRoomEntranceCounters(gridArea, pieces);
     this.drawRoomLevelBadges(gridArea, pieces);
+    this.drawRoomLocalMetricBadges(gridArea, pieces);
   }
 
   private drawAntTraffic(gridArea: GridArea, animationTimeMs: number): void {
@@ -3156,7 +3183,7 @@ export class ConstructionGridRenderer {
     }
 
     if (piece.definitionId === 'barracks') {
-      this.drawBarracksMarker(gridArea, rect, visualStyle);
+      this.drawBarracksMarker(gridArea, piece, rect, visualStyle);
       return;
     }
 
@@ -3195,6 +3222,7 @@ export class ConstructionGridRenderer {
 
   private drawBarracksMarker(
     gridArea: GridArea,
+    piece: GalleryPiece,
     rect: GalleryRect,
     visualStyle: RoomVisualStyle,
   ): void {
@@ -3218,6 +3246,57 @@ export class ConstructionGridRenderer {
     );
     this.graphics.lineStyle(2, 0x24160d, 0.8);
     this.graphics.lineBetween(centerX - guard, centerY, centerX + guard, centerY);
+
+    const capacity = this.getPieceLevel(piece) * 4;
+    const badgeWidth = Math.max(
+      gridArea.cellSize * 0.58,
+      Math.min(rect.width * 0.34, gridArea.cellSize * 0.94),
+    );
+    const badgeHeight = gridArea.cellSize * 0.26;
+    const badgeX = rect.x + rect.width - badgeWidth - gridArea.cellSize * 0.12;
+    const badgeY = rect.y + rect.height - badgeHeight - gridArea.cellSize * 0.12;
+
+    this.graphics.fillStyle(constructionGridPalette.panelFill, 0.92);
+    this.graphics.fillRoundedRect(
+      badgeX,
+      badgeY,
+      badgeWidth,
+      badgeHeight,
+      gridArea.cellSize * 0.1,
+    );
+    this.graphics.lineStyle(1.2, visualStyle.accentColor, 0.68);
+    this.graphics.strokeRoundedRect(
+      badgeX,
+      badgeY,
+      badgeWidth,
+      badgeHeight,
+      gridArea.cellSize * 0.1,
+    );
+
+    const label = this.gameObjects.text(
+      badgeX + badgeWidth / 2,
+      badgeY + badgeHeight / 2,
+      `⚔ ${capacity}`,
+      {
+        color: constructionGridPalette.textWarning,
+        fontFamily: 'Arial, Helvetica, sans-serif',
+        fontSize: `${Math.max(9, Math.round(gridArea.cellSize * 0.145))}px`,
+        fontStyle: '700',
+        resolution: constructionTextResolution,
+      },
+    );
+
+    label.setOrigin(0.5);
+    label.setShadow(
+      1,
+      1,
+      constructionGridPalette.textShadow,
+      2,
+      true,
+      true,
+    );
+    label.setDepth(1);
+    this.entranceCounterLabels.push(label);
   }
 
   private drawStorageMarker(
@@ -3882,6 +3961,94 @@ export class ConstructionGridRenderer {
       });
   }
 
+  private drawRoomLocalMetricBadges(
+    gridArea: GridArea,
+    pieces: readonly GalleryPiece[],
+  ): void {
+    pieces
+      .filter(
+        (piece) =>
+          this.isRoomPiece(piece) &&
+          piece.definitionId !== 'barracks',
+      )
+      .forEach((roomPiece) => {
+        const badgeLabel = this.getRoomLocalMetricBadgeLabel(roomPiece);
+
+        if (badgeLabel === null) {
+          return;
+        }
+
+        const rect = this.getGalleryRect(gridArea, roomPiece);
+        const visualStyle = this.getRoomVisualStyle(roomPiece);
+        const badgeWidth = Math.max(
+          gridArea.cellSize * 0.72,
+          Math.min(rect.width * 0.42, gridArea.cellSize * 1.24),
+        );
+        const badgeHeight = gridArea.cellSize * 0.28;
+        const badgeX = rect.x + rect.width - badgeWidth - gridArea.cellSize * 0.12;
+        const badgeY = rect.y + rect.height - badgeHeight - gridArea.cellSize * 0.12;
+
+        this.graphics.fillStyle(constructionGridPalette.panelFill, 0.92);
+        this.graphics.fillRoundedRect(
+          badgeX,
+          badgeY,
+          badgeWidth,
+          badgeHeight,
+          gridArea.cellSize * 0.1,
+        );
+        this.graphics.lineStyle(1.2, visualStyle.accentColor, 0.68);
+        this.graphics.strokeRoundedRect(
+          badgeX,
+          badgeY,
+          badgeWidth,
+          badgeHeight,
+          gridArea.cellSize * 0.1,
+        );
+
+        const label = this.gameObjects.text(
+          badgeX + badgeWidth / 2,
+          badgeY + badgeHeight / 2,
+          badgeLabel,
+          {
+            color: constructionGridPalette.textWarning,
+            fontFamily: 'Arial, Helvetica, sans-serif',
+            fontSize: `${Math.max(8, Math.round(gridArea.cellSize * 0.135))}px`,
+            fontStyle: '700',
+            resolution: constructionTextResolution,
+          },
+        );
+
+        label.setOrigin(0.5);
+        label.setShadow(
+          1,
+          1,
+          constructionGridPalette.textShadow,
+          2,
+          true,
+          true,
+        );
+        label.setDepth(1);
+        this.entranceCounterLabels.push(label);
+      });
+  }
+
+  private getRoomLocalMetricBadgeLabel(piece: GalleryPiece): string | null {
+    const level = this.getPieceLevel(piece);
+
+    switch (piece.definitionId) {
+      case 'brood-chamber':
+        return `W+${level}`;
+      case 'queen-chamber':
+        return `L+${level}`;
+      case 'storage':
+        return `C+${level * 40}`;
+      case 'fungus-farm':
+        return `F+${(level * 0.8).toFixed(1)}`;
+      default:
+        return null;
+    }
+  }
+
   private drawImproveModeRoomStates(
     gridArea: GridArea,
     pieces: readonly GalleryPiece[],
@@ -4220,10 +4387,13 @@ export class ConstructionGridRenderer {
     surfaceDefenseSnapshot: SurfaceDefenseSnapshot | undefined,
     animationTimeMs: number,
   ): void {
-    if (
-      surfaceDefenseSnapshot === undefined ||
-      surfaceDefenseSnapshot.activeThreat === null
-    ) {
+    if (surfaceDefenseSnapshot === undefined) {
+      return;
+    }
+
+    this.drawSurfaceRewardFeedback(gridArea, surfaceDefenseSnapshot);
+
+    if (surfaceDefenseSnapshot.activeThreat === null) {
       return;
     }
 
@@ -4257,6 +4427,51 @@ export class ConstructionGridRenderer {
       surfaceDefenseSnapshot.engagedSoldierCount,
       animationTimeMs,
     );
+  }
+
+  private drawSurfaceRewardFeedback(
+    gridArea: GridArea,
+    surfaceDefenseSnapshot: SurfaceDefenseSnapshot,
+  ): void {
+    const rewardFeedback = surfaceDefenseSnapshot.rewardFeedback;
+
+    if (rewardFeedback === null) {
+      return;
+    }
+
+    const leftEdge = gridArea.x + gridArea.cellSize * 0.75;
+    const rightEdge = gridArea.x + gridArea.width - gridArea.cellSize * 0.75;
+    const progressX =
+      rewardFeedback.direction === 'left-to-right'
+        ? this.Phaser.Math.Linear(leftEdge, rightEdge, rewardFeedback.progress)
+        : this.Phaser.Math.Linear(rightEdge, leftEdge, rewardFeedback.progress);
+    const riseProgress = Math.min(1, rewardFeedback.elapsedMs / 950);
+    const label = this.gameObjects.text(
+      progressX,
+      gridArea.y -
+        gridArea.cellSize * (0.62 + riseProgress * 0.45),
+      `+${rewardFeedback.gold} gold`,
+      {
+        color: constructionGridPalette.textWarning,
+        fontFamily: 'Arial, Helvetica, sans-serif',
+        fontSize: `${Math.max(11, Math.round(gridArea.cellSize * 0.18))}px`,
+        fontStyle: '700',
+        resolution: constructionTextResolution,
+      },
+    );
+
+    label.setOrigin(0.5);
+    label.setAlpha(1 - riseProgress);
+    label.setShadow(
+      1,
+      1,
+      constructionGridPalette.textShadow,
+      2,
+      true,
+      true,
+    );
+    label.setDepth(3);
+    this.entranceCounterLabels.push(label);
   }
 
   private drawSurfaceThreat(
